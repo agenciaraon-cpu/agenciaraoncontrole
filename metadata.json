@@ -1,0 +1,6 @@
+{
+  "name": "RAON PAINEL",
+  "description": "Sistema de gestão administrativa, comercial, operacional e financeira exclusivo da Agência Raon.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

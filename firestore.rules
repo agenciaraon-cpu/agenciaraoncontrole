@@ -1,0 +1,143 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net - Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isMasterAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'somosraon@gmail.com' ||
+        request.auth.token.email == 'agenciaraon@gmail.com'
+      );
+    }
+
+    function hasAdminRole() {
+      return isSignedIn() && (
+        isMasterAdmin() ||
+        (exists(/databases/$(database)/documents/profiles/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == 'ADMINISTRADOR')
+      );
+    }
+
+    function isFinancial() {
+      return isSignedIn() && (
+        hasAdminRole() ||
+        (exists(/databases/$(database)/documents/profiles/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == 'FINANCEIRO')
+      );
+    }
+
+    function isStaff() {
+      return isSignedIn();
+    }
+
+    // Profiles Collection
+    match /profiles/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (request.auth.uid == userId || hasAdminRole());
+      allow update: if isSignedIn() && (request.auth.uid == userId || hasAdminRole());
+      allow delete: if hasAdminRole();
+    }
+
+    // Clients Collection
+    match /clients/{clientId} {
+      allow read: if isStaff();
+      allow create, update: if isStaff();
+      allow delete: if hasAdminRole();
+    }
+
+    // Services Catalog Collection
+    match /services/{serviceId} {
+      allow read: if isStaff();
+      allow create, update: if isStaff();
+      allow delete: if hasAdminRole();
+    }
+
+    // Plans Collection
+    match /plans/{planId} {
+      allow read: if isStaff();
+      allow create, update: if isStaff();
+      allow delete: if hasAdminRole();
+    }
+
+    // Contracts Collection
+    match /contracts/{contractId} {
+      allow read: if isStaff();
+      allow create, update: if isFinancial();
+      allow delete: if hasAdminRole();
+    }
+
+    // Receivables Collection
+    match /receivables/{receivableId} {
+      allow read: if isFinancial();
+      allow create, update: if isFinancial();
+      allow delete: if hasAdminRole();
+    }
+
+    // Expenses Collection
+    match /expenses/{expenseId} {
+      allow read: if isFinancial();
+      allow create, update: if isFinancial();
+      allow delete: if hasAdminRole();
+    }
+
+    // Financial Categories
+    match /financial_categories/{categoryId} {
+      allow read: if isFinancial();
+      allow create, update: if isFinancial();
+      allow delete: if hasAdminRole();
+    }
+
+    // Tasks Collection
+    match /tasks/{taskId} {
+      allow read: if isStaff();
+      allow create, update: if isStaff();
+      allow delete: if hasAdminRole();
+    }
+
+    // Documents Collection
+    match /documents/{documentId} {
+      allow read: if isStaff();
+      allow create, update: if isStaff();
+      allow delete: if hasAdminRole();
+    }
+
+    // Notifications Collection
+    match /notifications/{notificationId} {
+      allow read: if isStaff();
+      allow create, update: if isStaff();
+      allow delete: if hasAdminRole();
+    }
+
+    // Contact Logs Collection
+    match /contact_logs/{logId} {
+      allow read: if isStaff();
+      allow create, update: if isStaff();
+      allow delete: if hasAdminRole();
+    }
+
+    // Audit Logs Collection
+    match /audit_logs/{logId} {
+      allow read: if hasAdminRole();
+      allow create: if isStaff();
+      allow update, delete: if false; // Immutable audit log
+    }
+
+    // Agency Settings Collection
+    match /agency_settings/{settingId} {
+      allow read: if isStaff();
+      allow write: if hasAdminRole();
+    }
+  }
+}

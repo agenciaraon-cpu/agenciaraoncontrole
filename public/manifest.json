@@ -1,0 +1,21 @@
+{
+  "short_name": "Raon Painel",
+  "name": "RAON PAINEL — Agência Raon",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#102B59",
+  "theme_color": "#0878D9",
+  "display": "standalone",
+  "orientation": "portrait"
+}

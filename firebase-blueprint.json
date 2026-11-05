@@ -1,0 +1,317 @@
+{
+  "entities": {
+    "Profile": {
+      "title": "Profile",
+      "description": "User profile with role-based access control (ADMINISTRADOR, FINANCEIRO, COLABORADOR)",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "maxLength": 100 },
+        "name": { "type": "string", "maxLength": 100 },
+        "role": { "type": "string", "enum": ["ADMINISTRADOR", "FINANCEIRO", "COLABORADOR"] },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["email", "name", "role", "active"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "Agency client account",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "maxLength": 30 },
+        "companyName": { "type": "string", "maxLength": 150 },
+        "tradeName": { "type": "string", "maxLength": 150 },
+        "responsibleName": { "type": "string", "maxLength": 120 },
+        "taxId": { "type": "string", "maxLength": 30 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "whatsapp": { "type": "string", "maxLength": 30 },
+        "email": { "type": "string", "maxLength": 100 },
+        "address": { "type": "string", "maxLength": 200 },
+        "city": { "type": "string", "maxLength": 80 },
+        "state": { "type": "string", "maxLength": 10 },
+        "instagram": { "type": "string", "maxLength": 100 },
+        "facebook": { "type": "string", "maxLength": 100 },
+        "website": { "type": "string", "maxLength": 150 },
+        "googleProfile": { "type": "string", "maxLength": 150 },
+        "responsibleBirthDate": { "type": "string", "maxLength": 15 },
+        "companyAnniversaryDate": { "type": "string", "maxLength": 15 },
+        "entryDate": { "type": "string", "maxLength": 15 },
+        "planId": { "type": "string", "maxLength": 50 },
+        "planName": { "type": "string", "maxLength": 100 },
+        "monthlyFee": { "type": "number" },
+        "dueDay": { "type": "number" },
+        "status": { "type": "string", "enum": ["ativo", "inativo", "suspenso", "cancelado"] },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "congratulatedYear": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["companyName", "responsibleName", "whatsapp", "status"]
+    },
+    "Service": {
+      "title": "Service",
+      "description": "Catalog item of agency services",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 120 },
+        "category": { "type": "string", "maxLength": 60 },
+        "description": { "type": "string", "maxLength": 500 },
+        "frequency": { "type": "string", "maxLength": 50 },
+        "estimatedQty": { "type": "number" },
+        "referencePrice": { "type": "number" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name", "category", "active"]
+    },
+    "Plan": {
+      "title": "Plan",
+      "description": "Standard or customized plan of Agência Raon",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "maxLength": 50 },
+        "name": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 500 },
+        "defaultServiceIds": { "type": "array" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["code", "name", "active"]
+    },
+    "Contract": {
+      "title": "Contract",
+      "description": "Client contract record",
+      "type": "object",
+      "properties": {
+        "contractNumber": { "type": "string", "maxLength": 50 },
+        "clientId": { "type": "string", "maxLength": 100 },
+        "clientName": { "type": "string", "maxLength": 150 },
+        "planId": { "type": "string", "maxLength": 50 },
+        "planName": { "type": "string", "maxLength": 100 },
+        "monthlyFee": { "type": "number" },
+        "startDate": { "type": "string", "maxLength": 15 },
+        "endDate": { "type": "string", "maxLength": 15 },
+        "dueDay": { "type": "number" },
+        "paymentMethod": { "type": "string", "maxLength": 50 },
+        "discount": { "type": "number" },
+        "services": { "type": "array" },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "status": { "type": "string", "enum": ["vigente", "renovado", "suspenso", "cancelado", "encerrado"] },
+        "documentUrl": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["clientId", "monthlyFee", "dueDay", "status"]
+    },
+    "Receivable": {
+      "title": "Receivable",
+      "description": "Invoice and recurring receivable installment",
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string", "maxLength": 100 },
+        "clientName": { "type": "string", "maxLength": 150 },
+        "contractId": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 200 },
+        "dueDate": { "type": "string", "maxLength": 15 },
+        "competence": { "type": "string", "maxLength": 15 },
+        "originalAmount": { "type": "number" },
+        "discountAmount": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pendente", "recebido", "parcial", "vencido", "cancelado"] },
+        "paymentMethod": { "type": "string", "maxLength": 50 },
+        "paymentDate": { "type": "string", "maxLength": 15 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "receiptUrl": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["clientId", "dueDate", "competence", "originalAmount", "status"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Outflow / account payable",
+      "type": "object",
+      "properties": {
+        "categoryId": { "type": "string", "maxLength": 100 },
+        "categoryName": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 200 },
+        "dueDate": { "type": "string", "maxLength": 15 },
+        "competence": { "type": "string", "maxLength": 15 },
+        "amount": { "type": "number" },
+        "supplierName": { "type": "string", "maxLength": 150 },
+        "status": { "type": "string", "enum": ["pendente", "pago", "vencido"] },
+        "paymentDate": { "type": "string", "maxLength": 15 },
+        "paymentMethod": { "type": "string", "maxLength": 50 },
+        "receiptUrl": { "type": "string", "maxLength": 500 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["description", "dueDate", "amount", "status"]
+    },
+    "FinancialCategory": {
+      "title": "FinancialCategory",
+      "description": "Category for expenses and revenues",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 100 },
+        "type": { "type": "string", "enum": ["receita", "despesa_fixa", "despesa_variavel", "ferramenta", "operacional"] },
+        "active": { "type": "boolean" }
+      },
+      "required": ["name", "type", "active"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "Client service delivery task",
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string", "maxLength": 100 },
+        "clientName": { "type": "string", "maxLength": 150 },
+        "serviceName": { "type": "string", "maxLength": 120 },
+        "title": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "assignedTo": { "type": "string", "maxLength": 100 },
+        "priority": { "type": "string", "enum": ["baixa", "media", "alta", "urgente"] },
+        "dueDate": { "type": "string", "maxLength": 15 },
+        "status": { "type": "string", "enum": ["a_fazer", "em_andamento", "aguardando_cliente", "em_revisao", "concluida", "cancelada"] },
+        "comments": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["title", "priority", "status"]
+    },
+    "Document": {
+      "title": "Document",
+      "description": "Stored document metadata for client or transaction",
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string", "maxLength": 100 },
+        "clientName": { "type": "string", "maxLength": 150 },
+        "contractId": { "type": "string", "maxLength": 100 },
+        "name": { "type": "string", "maxLength": 150 },
+        "category": { "type": "string", "enum": ["contrato", "comprovante", "briefing", "arte", "administrativo"] },
+        "fileUrl": { "type": "string", "maxLength": 500 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name", "category"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Central system notification",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 500 },
+        "category": { "type": "string", "enum": ["aniversario", "vencimento", "inadimplencia", "contrato", "tarefa"] },
+        "priority": { "type": "string", "enum": ["baixa", "media", "alta"] },
+        "read": { "type": "boolean" },
+        "linkUrl": { "type": "string", "maxLength": 200 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["title", "category", "read"]
+    },
+    "ContactLog": {
+      "title": "ContactLog",
+      "description": "Log of client communications such as WhatsApp and emails",
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string", "maxLength": 100 },
+        "clientName": { "type": "string", "maxLength": 150 },
+        "type": { "type": "string", "maxLength": 30 },
+        "templateUsed": { "type": "string", "maxLength": 100 },
+        "messageContent": { "type": "string", "maxLength": 2000 },
+        "sentBy": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["clientId", "type", "messageContent"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Traceability record for all major business actions",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 100 },
+        "userEmail": { "type": "string", "maxLength": 100 },
+        "entityType": { "type": "string", "maxLength": 50 },
+        "entityId": { "type": "string", "maxLength": 100 },
+        "action": { "type": "string", "maxLength": 50 },
+        "details": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["userEmail", "entityType", "action"]
+    },
+    "AgencySetting": {
+      "title": "AgencySetting",
+      "description": "Institutional configuration for Agência Raon",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 100 },
+        "tradeName": { "type": "string", "maxLength": 100 },
+        "instagram": { "type": "string", "maxLength": 100 },
+        "whatsapp": { "type": "string", "maxLength": 30 },
+        "adminEmail": { "type": "string", "maxLength": 100 },
+        "logoUrl": { "type": "string", "maxLength": 500 },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["name", "whatsapp", "adminEmail"]
+    }
+  },
+  "firestore": {
+    "/profiles/{userId}": {
+      "schema": "Profile",
+      "description": "User profiles with role definitions"
+    },
+    "/clients/{clientId}": {
+      "schema": "Client",
+      "description": "Agency client records"
+    },
+    "/services/{serviceId}": {
+      "schema": "Service",
+      "description": "Service catalog of Agência Raon"
+    },
+    "/plans/{planId}": {
+      "schema": "Plan",
+      "description": "Official and custom plans"
+    },
+    "/contracts/{contractId}": {
+      "schema": "Contract",
+      "description": "Client contracts and scope history"
+    },
+    "/receivables/{receivableId}": {
+      "schema": "Receivable",
+      "description": "Accounts receivable and billing records"
+    },
+    "/expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Accounts payable and operational expenses"
+    },
+    "/financial_categories/{categoryId}": {
+      "schema": "FinancialCategory",
+      "description": "Financial categorization definitions"
+    },
+    "/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "Service tasks and deliveries"
+    },
+    "/documents/{documentId}": {
+      "schema": "Document",
+      "description": "Documents and contract attachments"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Notifications and proactive alerts"
+    },
+    "/contact_logs/{logId}": {
+      "schema": "ContactLog",
+      "description": "Log of interactions with clients"
+    },
+    "/audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Security and financial audit log"
+    },
+    "/agency_settings/{settingId}": {
+      "schema": "AgencySetting",
+      "description": "Agência Raon system settings"
+    }
+  }
+}
