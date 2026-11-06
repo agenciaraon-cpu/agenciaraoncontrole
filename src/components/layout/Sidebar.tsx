@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Sparkles,
   ShieldAlert,
+  ShoppingBag,
 } from 'lucide-react';
 import { Logo } from '../common/Logo';
 import { ActiveTab, UserRole } from '../../types';
@@ -86,6 +87,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badgeColor: 'bg-[#FF7817]',
       allowedRoles: ['ADMINISTRADOR', 'FINANCEIRO'],
       description: 'Recebíveis, Despesas & Fluxo',
+    },
+    {
+      id: 'products_services',
+      label: 'Produtos e Serviços',
+      icon: ShoppingBag,
+      description: 'Produtos Físicos, Digitais & Vendas',
     },
     {
       id: 'birthdays',

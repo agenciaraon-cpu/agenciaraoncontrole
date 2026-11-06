@@ -17,7 +17,12 @@ import {
   CheckCircle,
   CheckCircle2,
   ChevronRight,
-  MessageCircle,
+  ShoppingBag,
+  Package,
+  Layers,
+  Briefcase,
+  PieChart as PieIcon,
+  BarChart2,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import {
@@ -31,13 +36,11 @@ import {
   PieChart,
   Pie,
   Cell,
-  LineChart,
-  Line,
   Legend,
   AreaChart,
   Area,
 } from 'recharts';
-import { Client, Contract, Receivable, Expense, ActiveTab } from '../types';
+import { Client, Contract, Receivable, Expense, ActiveTab, Sale, ProductService } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { registerReceivablePayment } from '../services/db';
 
@@ -46,6 +49,8 @@ interface DashboardViewProps {
   contracts: Contract[];
   receivables: Receivable[];
   expenses: Expense[];
+  sales?: Sale[];
+  productsServices?: ProductService[];
   onNavigate: (tab: ActiveTab) => void;
   onOpenWhatsAppForClient?: (client: Client) => void;
   onRefresh?: () => void;
@@ -56,6 +61,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   contracts,
   receivables,
   expenses,
+  sales = [],
+  productsServices = [],
   onNavigate,
   onOpenWhatsAppForClient,
   onRefresh,
@@ -97,7 +104,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       );
       confetti({ particleCount: 50, spread: 60, origin: { y: 0.6 } });
       alert(
-        `✓ Pagamento de ${formatCurrency(amount)} de ${r.clientName} confirmado com sucesso!\nO valor entrou instantaneamente no Faturamento Recebido e no Resultado Financeiro do Dashboard.`
+        `✓ Pagamento de ${formatCurrency(amount)} (${r.clientName}) confirmado com sucesso!\nO valor entrou instantaneamente no Faturamento Recebido e no Resultado Financeiro do Dashboard.`
       );
       onRefresh?.();
     } catch (err: any) {
@@ -108,58 +115,90 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     }
   };
 
-  // 12 Mandatory Indicators calculated from real data
+  // ==================== CALCULATION OF METRICS BY REVENUE SOURCE ====================
   const metrics = useMemo(() => {
-    // 1. Total clients
+    // 1. Clients metrics
     const totalClients = clients.length;
-
-    // 2. Active clients
     const activeClients = clients.filter((c) => c.status === 'ativo').length;
-
-    // 3. Inactive clients
-    const inactiveClients = clients.filter((c) => c.status !== 'ativo').length;
-
-    // 4. New clients of the month
+    const pausedClients = clients.filter((c) => c.status === 'pausado').length;
+    const inactiveClients = clients.filter((c) => c.status === 'inativo' || c.status === 'cancelado').length;
     const newClientsThisMonth = clients.filter((c) => {
       const dateStr = c.entryDate || c.createdAt || '';
       return dateStr.startsWith(`${currentYear}-${currentMonthNum}`);
     }).length;
 
-    // 5. Contracted MRR (Monthly Recurring Revenue)
+    // 2. Agency Recurring (Fonte A)
     const activeContracts = contracts.filter((c) => c.status === 'vigente' || c.status === 'renovado');
     const mrrContracted = activeContracts.reduce((acc, c) => acc + (Number(c.monthlyFee) || 0), 0);
 
-    // 6. Revenue received in the month
-    const receivedThisMonth = receivables
-      .filter((r) => r.competence === currentCompetence && (r.status === 'recebido' || r.status === 'parcial'))
-      .reduce((acc, r) => acc + (Number(r.paidAmount) || 0), 0);
+    // Filter receivables for current month
+    const currentMonthReceivables = receivables.filter((r) => r.competence === currentCompetence);
 
-    // 7. Pending receivables in current month
-    const pendingThisMonth = receivables
-      .filter((r) => r.competence === currentCompetence && r.status === 'pendente')
-      .reduce((acc, r) => acc + (Number(r.originalAmount) - (Number(r.discountAmount) || 0)), 0);
+    // Received this month by source
+    const receivedAgency = currentMonthReceivables
+      .filter(
+        (r) =>
+          (r.revenueSource === 'agencia' || (!r.revenueSource && !r.saleId)) &&
+          (r.status === 'recebido' || r.status === 'parcial')
+      )
+      .reduce((sum, r) => sum + (Number(r.paidAmount) || 0), 0);
 
-    // 8. Overdue receivables (all months)
+    const receivedProducts = currentMonthReceivables
+      .filter((r) => r.revenueSource === 'produto' && (r.status === 'recebido' || r.status === 'parcial'))
+      .reduce((sum, r) => sum + (Number(r.paidAmount) || 0), 0);
+
+    const receivedServices = currentMonthReceivables
+      .filter((r) => r.revenueSource === 'servico_avulso' && (r.status === 'recebido' || r.status === 'parcial'))
+      .reduce((sum, r) => sum + (Number(r.paidAmount) || 0), 0);
+
+    // CONSOLIDATED TOTAL RECEIVED
+    const totalReceivedConsolidated = receivedAgency + receivedProducts + receivedServices;
+
+    // Sales registered in current month (Gross Sales / Volume)
+    const currentMonthSales = sales.filter((s) => s.saleDate.startsWith(`${currentYear}-${currentMonthNum}`));
+
+    const productSalesVolume = currentMonthSales
+      .filter((s) => s.itemType === 'produto' && s.status !== 'cancelado')
+      .reduce((sum, s) => sum + Number(s.totalAmount || 0), 0);
+
+    const serviceSalesVolume = currentMonthSales
+      .filter((s) => s.itemType === 'servico' && s.status !== 'cancelado')
+      .reduce((sum, s) => sum + Number(s.totalAmount || 0), 0);
+
+    const productSalesCount = currentMonthSales.filter((s) => s.itemType === 'produto' && s.status !== 'cancelado').length;
+    const serviceSalesCount = currentMonthSales.filter((s) => s.itemType === 'servico' && s.status !== 'cancelado').length;
+
+    // Pending Receivables
+    const pendingAgency = currentMonthReceivables
+      .filter((r) => (r.revenueSource === 'agencia' || (!r.revenueSource && !r.saleId)) && r.status === 'pendente')
+      .reduce((sum, r) => sum + (Number(r.originalAmount) - (Number(r.discountAmount) || 0)), 0);
+
+    const pendingStandalone = currentMonthReceivables
+      .filter((r) => (r.revenueSource === 'produto' || r.revenueSource === 'servico_avulso') && r.status === 'pendente')
+      .reduce((sum, r) => sum + (Number(r.originalAmount) - (Number(r.discountAmount) || 0)), 0);
+
+    const totalPendingMonth = pendingAgency + pendingStandalone;
+
+    // Overdue (all months)
     const overdueTotal = receivables
       .filter((r) => r.status === 'vencido')
       .reduce((acc, r) => acc + (Number(r.originalAmount) - (Number(r.paidAmount) || 0)), 0);
 
-    // 9. Monthly expenses (current month)
+    // Expenses (current month)
     const monthlyExpenses = expenses
-      .filter((e) => e.competence === currentCompetence)
+      .filter((e) => e.competence === currentCompetence && e.status === 'pago')
       .reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
 
-    // 10. Financial Net Result
-    const netResult = receivedThisMonth - monthlyExpenses;
+    // Net Result
+    const netResult = totalReceivedConsolidated - monthlyExpenses;
 
-    // 11. Contracts expiring in next 30 days
+    // Contracts expiring
     const next30DaysDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    const todayStr = now.toISOString().split('T')[0];
     const contractsExpiringSoon = contracts.filter(
       (c) => c.endDate && c.endDate >= todayStr && c.endDate <= next30DaysDate && c.status === 'vigente'
     ).length;
 
-    // 12. Birthdays of the month
+    // Birthdays
     const birthdaysThisMonth = clients.filter((c) => {
       if (!c.responsibleBirthDate) return false;
       const parts = c.responsibleBirthDate.split('-');
@@ -169,22 +208,50 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return {
       totalClients,
       activeClients,
+      pausedClients,
       inactiveClients,
       newClientsThisMonth,
       mrrContracted,
-      receivedThisMonth,
-      pendingThisMonth,
+      receivedAgency,
+      receivedProducts,
+      receivedServices,
+      totalReceivedConsolidated,
+      productSalesVolume,
+      serviceSalesVolume,
+      productSalesCount,
+      serviceSalesCount,
+      pendingAgency,
+      pendingStandalone,
+      totalPendingMonth,
       overdueTotal,
       monthlyExpenses,
       netResult,
       contractsExpiringSoon,
       birthdaysCount: birthdaysThisMonth.length,
-      birthdaysList: birthdaysThisMonth,
     };
-  }, [clients, contracts, receivables, expenses, currentMonthNum, currentYear, currentCompetence]);
+  }, [clients, contracts, receivables, expenses, sales, currentMonthNum, currentYear, currentCompetence, todayStr]);
 
-  // Chart 1: Revenue last 12 months (dynamically grouped)
-  const revenue12MonthsData = useMemo(() => {
+  // ==================== CHARTS DATA ====================
+
+  // Chart 1: Proporção das Receitas por Fonte (Donut)
+  const revenueSourceDonutData = useMemo(() => {
+    const data = [
+      { name: 'Agência (Contratos)', value: metrics.receivedAgency, color: '#0878D9' },
+      { name: 'Produtos (Físicos/Digitais)', value: metrics.receivedProducts, color: '#FF7817' },
+      { name: 'Serviços Avulsos', value: metrics.receivedServices, color: '#102B59' },
+    ].filter((item) => item.value > 0);
+
+    return data.length > 0
+      ? data
+      : [
+          { name: 'Agência (Contratos)', value: 1, color: '#0878D9' },
+          { name: 'Produtos', value: 0, color: '#FF7817' },
+          { name: 'Serviços Avulsos', value: 0, color: '#102B59' },
+        ];
+  }, [metrics.receivedAgency, metrics.receivedProducts, metrics.receivedServices]);
+
+  // Chart 2: Evolução Mensal por Fonte (Últimos 12 Meses)
+  const monthlyEvolutionBySource = useMemo(() => {
     const list = [];
     for (let i = 11; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -193,8 +260,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       const comp = `${mNum}/${yNum}`;
       const monthLabel = d.toLocaleString('pt-BR', { month: 'short' }).replace('.', '');
 
-      const rec = receivables
-        .filter((r) => r.competence === comp && (r.status === 'recebido' || r.status === 'parcial'))
+      const recAgency = receivables
+        .filter(
+          (r) =>
+            r.competence === comp &&
+            (r.revenueSource === 'agencia' || (!r.revenueSource && !r.saleId)) &&
+            (r.status === 'recebido' || r.status === 'parcial')
+        )
+        .reduce((sum, r) => sum + (Number(r.paidAmount) || 0), 0);
+
+      const recProd = receivables
+        .filter((r) => r.competence === comp && r.revenueSource === 'produto' && (r.status === 'recebido' || r.status === 'parcial'))
+        .reduce((sum, r) => sum + (Number(r.paidAmount) || 0), 0);
+
+      const recServ = receivables
+        .filter((r) => r.competence === comp && r.revenueSource === 'servico_avulso' && (r.status === 'recebido' || r.status === 'parcial'))
         .reduce((sum, r) => sum + (Number(r.paidAmount) || 0), 0);
 
       const exp = expenses
@@ -202,125 +282,197 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 
       list.push({
-        name: `${monthLabel}/${String(yNum).slice(2)}`,
-        receita: rec,
+        mes: `${monthLabel}/${String(yNum).slice(2)}`,
+        agencia: recAgency,
+        produtos: recProd,
+        servicos: recServ,
+        total: recAgency + recProd + recServ,
         despesa: exp,
       });
     }
     return list;
   }, [receivables, expenses]);
 
-  // Chart 2: Clients by Plan
-  const clientsByPlanData = useMemo(() => {
-    const map: Record<string, number> = {
-      'Start Bronze': 0,
-      'Prata Plus': 0,
-      'Gold Essencial': 0,
-      Personalizado: 0,
-    };
-
-    clients.forEach((c) => {
-      const pName = c.planName || 'Personalizado';
-      if (pName.includes('Bronze')) map['Start Bronze']++;
-      else if (pName.includes('Prata')) map['Prata Plus']++;
-      else if (pName.includes('Gold')) map['Gold Essencial']++;
-      else map['Personalizado']++;
-    });
-
+  // Chart 3: Vendas de Produtos vs Serviços Avulsos (Vendido vs Recebido no Mês)
+  const productsVsServicesData = useMemo(() => {
     return [
-      { name: 'Start Bronze', value: map['Start Bronze'], color: '#CD7F32' },
-      { name: 'Prata Plus', value: map['Prata Plus'], color: '#0878D9' },
-      { name: 'Gold Essencial', value: map['Gold Essencial'], color: '#FF7817' },
-      { name: 'Personalizado', value: map['Personalizado'], color: '#102B59' },
-    ].filter((item) => item.value > 0);
-  }, [clients]);
+      {
+        categoria: 'Produtos Físicos/Digitais',
+        vendido: metrics.productSalesVolume,
+        recebido: metrics.receivedProducts,
+      },
+      {
+        categoria: 'Serviços Avulsos',
+        vendido: metrics.serviceSalesVolume,
+        recebido: metrics.receivedServices,
+      },
+    ];
+  }, [metrics.productSalesVolume, metrics.receivedProducts, metrics.serviceSalesVolume, metrics.receivedServices]);
 
-  // Chart 3: Client Evolution
-  const clientEvolutionData = useMemo(() => {
-    const list = [];
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const mNum = String(d.getMonth() + 1).padStart(2, '0');
-      const yNum = d.getFullYear();
-      const prefix = `${yNum}-${mNum}`;
-      const monthLabel = d.toLocaleString('pt-BR', { month: 'short' });
+  // Chart 4: Receita da Agência vs Vendas Avulsas
+  const agencyVsStandaloneData = useMemo(() => {
+    return [
+      {
+        tipo: 'Agência (Contratos)',
+        valor: metrics.receivedAgency,
+        fill: '#0878D9',
+      },
+      {
+        tipo: 'Vendas Avulsas (Prod + Serv)',
+        valor: metrics.receivedProducts + metrics.receivedServices,
+        fill: '#FF7817',
+      },
+    ];
+  }, [metrics.receivedAgency, metrics.receivedProducts, metrics.receivedServices]);
 
-      const totalUntilMonth = clients.filter((c) => {
-        const cDate = c.entryDate || c.createdAt || '';
-        return cDate.slice(0, 7) <= prefix;
-      }).length;
-
-      list.push({
-        mes: monthLabel,
-        clientes: totalUntilMonth,
+  // Chart 5: Itens Mais Vendidos (Produtos e Serviços)
+  const topSellingItemsData = useMemo(() => {
+    const itemMap: Record<string, { name: string; count: number; total: number }> = {};
+    sales
+      .filter((s) => s.status !== 'cancelado')
+      .forEach((s) => {
+        if (!itemMap[s.itemName]) {
+          itemMap[s.itemName] = { name: s.itemName, count: 0, total: 0 };
+        }
+        itemMap[s.itemName].count += Number(s.quantity) || 1;
+        itemMap[s.itemName].total += Number(s.totalAmount) || 0;
       });
-    }
+
+    const list = Object.values(itemMap).sort((a, b) => b.total - a.total).slice(0, 5);
     return list;
-  }, [clients]);
+  }, [sales]);
 
-  // Chart 4: Top Contracted Services
-  const topServicesData = useMemo(() => {
-    const serviceCounts: Record<string, number> = {};
-    contracts.forEach((c) => {
-      if (Array.isArray(c.services)) {
-        c.services.forEach((s) => {
-          serviceCounts[s.name] = (serviceCounts[s.name] || 0) + 1;
-        });
-      }
-    });
-
-    return Object.entries(serviceCounts)
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 5);
-  }, [contracts]);
+  // Calculate percentages for the hero card
+  const agencyPct = metrics.totalReceivedConsolidated > 0
+    ? Math.round((metrics.receivedAgency / metrics.totalReceivedConsolidated) * 100)
+    : 0;
+  const prodPct = metrics.totalReceivedConsolidated > 0
+    ? Math.round((metrics.receivedProducts / metrics.totalReceivedConsolidated) * 100)
+    : 0;
+  const servPct = metrics.totalReceivedConsolidated > 0
+    ? Math.round((metrics.receivedServices / metrics.totalReceivedConsolidated) * 100)
+    : 0;
 
   return (
     <div className="space-y-6">
-      {/* Welcome Banner */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#102B59] via-[#0878D9] to-[#102B59] p-6 text-white shadow-xl">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 mb-1.5">
-              <span className="px-2.5 py-0.5 rounded-full bg-[#FF7817] text-white text-[10px] font-black uppercase tracking-wider">
-                Painel Executivo
+      {/* ==================== 1. DESTAQUE PRINCIPAL — TOTAL RECEBIDO NO MÊS (CONSOLIDADO) ==================== */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#102B59] via-[#0B3A75] to-[#0878D9] p-6 sm:p-8 text-white shadow-2xl border border-white/10">
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+          <div className="max-w-xl">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="px-3 py-1 rounded-full bg-[#FF7817] text-white text-[11px] font-black uppercase tracking-wider shadow-sm flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5" />
+                Faturamento Consolidado
               </span>
-              <span className="text-xs text-white/80">Competência {currentCompetence}</span>
+              <span className="text-xs font-semibold text-blue-200">Competência {currentCompetence}</span>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-              Agência Raon — Gestão Integrada
+
+            <p className="text-xs uppercase tracking-widest text-blue-200 font-bold">
+              Total Recebido no Mês (Agência + Produtos + Serviços Avulsos)
+            </p>
+            <h1 className="text-3xl sm:text-5xl font-black tracking-tight text-white mt-1">
+              {isCollaborator ? 'R$ •••••' : formatCurrency(metrics.totalReceivedConsolidated)}
             </h1>
-            <p className="text-sm text-slate-200 mt-1 max-w-xl">
-              Acompanhe os principais indicadores de faturamento, novos contratos e entregas em tempo real.
+            <p className="text-xs sm:text-sm text-blue-100/90 mt-2">
+              Valor líquido compensado em caixa em todas as fontes de receita da Agência Raon.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          {/* Quick Actions */}
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              onClick={() => onNavigate('products_services')}
+              className="px-4 py-2.5 bg-[#FF7817] hover:bg-[#E5680E] text-white font-bold text-xs rounded-xl shadow-lg transition-all hover:scale-105 flex items-center gap-1.5"
+            >
+              <ShoppingBag className="w-4 h-4" />
+              <span>+ Registrar Nova Venda</span>
+            </button>
             <button
               onClick={() => onNavigate('clients')}
-              className="px-4 py-2 bg-white text-[#102B59] hover:bg-slate-100 font-bold text-xs rounded-xl shadow-md transition-all hover:scale-105"
+              className="px-4 py-2.5 bg-white text-[#102B59] hover:bg-slate-100 font-bold text-xs rounded-xl shadow-md transition-all hover:scale-105 flex items-center gap-1.5"
             >
-              + Novo Cliente
+              <Users className="w-4 h-4" />
+              <span>+ Novo Cliente</span>
             </button>
-            {!isCollaborator && (
-              <button
-                onClick={() => onNavigate('financial')}
-                className="px-4 py-2 bg-[#FF7817] hover:bg-[#E5680E] text-white font-bold text-xs rounded-xl shadow-md transition-all hover:scale-105"
-              >
-                + Lançamento Financeiro
-              </button>
-            )}
             <button
-              onClick={() => onNavigate('tasks')}
-              className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold text-xs rounded-xl transition-colors"
+              onClick={() => onNavigate('financial')}
+              className="px-4 py-2.5 bg-white/15 hover:bg-white/25 border border-white/20 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5"
             >
-              Ver Kanban
+              <DollarSign className="w-4 h-4" />
+              <span>Financeiro</span>
             </button>
           </div>
         </div>
 
+        {/* ==================== 3 SUB-CARDS DETALHANDO AS FONTES DE RECEITA ==================== */}
+        <div className="relative z-10 grid grid-cols-1 sm:grid-cols-3 gap-3.5 mt-6 pt-6 border-t border-white/15">
+          {/* Fonte A: Agência Raon */}
+          <div
+            onClick={() => onNavigate('financial')}
+            className="p-4 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 backdrop-blur-md transition-all cursor-pointer group"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-blue-200 uppercase tracking-wider flex items-center gap-1.5">
+                <Briefcase className="w-3.5 h-3.5 text-[#0878D9]" />
+                Agência (Contratos)
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-blue-500/30 text-blue-100 text-[10px] font-black">
+                {agencyPct}% do total
+              </span>
+            </div>
+            <p className="text-xl sm:text-2xl font-black text-white mt-1.5">
+              {isCollaborator ? 'R$ •••••' : formatCurrency(metrics.receivedAgency)}
+            </p>
+            <p className="text-[11px] text-blue-200/80 mt-0.5">Mensalidades e fee de clientes</p>
+          </div>
+
+          {/* Fonte B: Produtos */}
+          <div
+            onClick={() => onNavigate('products_services')}
+            className="p-4 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 backdrop-blur-md transition-all cursor-pointer group"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-orange-200 uppercase tracking-wider flex items-center gap-1.5">
+                <Package className="w-3.5 h-3.5 text-[#FF7817]" />
+                Produtos (Físicos/Digitais)
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-orange-500/30 text-orange-100 text-[10px] font-black">
+                {prodPct}% do total
+              </span>
+            </div>
+            <p className="text-xl sm:text-2xl font-black text-white mt-1.5">
+              {isCollaborator ? 'R$ •••••' : formatCurrency(metrics.receivedProducts)}
+            </p>
+            <p className="text-[11px] text-orange-200/80 mt-0.5">
+              {metrics.productSalesCount} venda(s) registrada(s)
+            </p>
+          </div>
+
+          {/* Fonte C: Serviços Avulsos */}
+          <div
+            onClick={() => onNavigate('products_services')}
+            className="p-4 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 backdrop-blur-md transition-all cursor-pointer group"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-indigo-200 uppercase tracking-wider flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-indigo-300" />
+                Serviços Avulsos
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-indigo-500/30 text-indigo-100 text-[10px] font-black">
+                {servPct}% do total
+              </span>
+            </div>
+            <p className="text-xl sm:text-2xl font-black text-white mt-1.5">
+              {isCollaborator ? 'R$ •••••' : formatCurrency(metrics.receivedServices)}
+            </p>
+            <p className="text-[11px] text-indigo-200/80 mt-0.5">
+              {metrics.serviceSalesCount} serviço(s) avulso(s)
+            </p>
+          </div>
+        </div>
+
         {/* Ambient Glow */}
-        <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-[#FF7817]/20 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -right-10 -bottom-10 w-72 h-72 bg-[#FF7817]/25 rounded-full blur-3xl pointer-events-none" />
       </div>
 
       {/* ==================== AVISO & CONFIRMAÇÃO DE RECEBIMENTOS NO VENCIMENTO ==================== */}
@@ -332,7 +484,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
             <div>
               <h3 className="font-bold text-sm text-slate-800 dark:text-white flex items-center gap-2">
-                Pagamentos no Vencimento — Aguardando Confirmação
+                Cobranças & Vendas no Vencimento — Aguardando Confirmação
                 {pendingDueReceivables.length > 0 && (
                   <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-black">
                     {pendingDueReceivables.length} para confirmar
@@ -340,7 +492,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 )}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                O valor só entra no <strong>Faturamento Recebido</strong> e no <strong>Resultado Financeiro</strong> após você confirmar o recebimento abaixo.
+                O valor só entra no <strong>Total Recebido no Mês</strong> após você confirmar o recebimento abaixo.
               </p>
             </div>
           </div>
@@ -355,13 +507,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {pendingDueReceivables.length === 0 ? (
           <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/30 text-emerald-800 dark:text-emerald-300 flex items-center gap-2 text-xs font-semibold">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-            <span>Excelente! Não há cobranças pendentes aguardando confirmação no momento. Todos os recebimentos confirmados já constam nas métricas abaixo.</span>
+            <span>Excelente! Não há cobranças pendentes aguardando confirmação no momento. Todos os recebimentos confirmados já constam nas métricas acima.</span>
           </div>
         ) : (
           <div className="space-y-2">
             {pendingDueReceivables.slice(0, 4).map((r) => {
               const isOverdue = r.dueDate < todayStr;
               const isDueToday = r.dueDate === todayStr;
+              const sourceLabel =
+                r.revenueSource === 'produto'
+                  ? 'Produto'
+                  : r.revenueSource === 'servico_avulso'
+                  ? 'Serviço Avulso'
+                  : 'Agência';
 
               return (
                 <div
@@ -384,6 +542,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-xs text-slate-800 dark:text-white">
                           {r.clientName}
+                        </span>
+                        <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                          {sourceLabel}
                         </span>
                         <span
                           className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
@@ -411,7 +572,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       onClick={() => handleConfirmReceipt(r)}
                       disabled={confirmingRecId === r.id}
                       className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition-all hover:scale-105 disabled:opacity-50"
-                      title="Confirmar que você já recebeu este valor e debitar para o financeiro do Dashboard"
+                      title="Confirmar recebimento e lançar no Dashboard"
                     >
                       <CheckCircle2 className="w-3.5 h-3.5" />
                       <span>{confirmingRecId === r.id ? 'Confirmando...' : '✓ Confirmar que Já Recebi'}</span>
@@ -420,192 +581,114 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               );
             })}
-            {pendingDueReceivables.length > 4 && (
-              <div className="text-center pt-1">
-                <button
-                  onClick={() => onNavigate('financial')}
-                  className="text-xs font-bold text-[#0878D9] hover:underline"
-                >
-                  Ver mais {pendingDueReceivables.length - 4} cobranças no financeiro
-                </button>
-              </div>
-            )}
           </div>
         )}
       </div>
 
-      {/* 12 Mandated Indicators Grid */}
+      {/* ==================== INDICADORES ESTRATÉGICOS INDIVIDUAIS ==================== */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
             <Sparkles className="w-4 h-4 text-[#FF7817]" />
-            12 Indicadores Estratégicos Oficiais
+            Indicadores Estratégicos Oficiais
           </h2>
-          <span className="text-xs text-slate-400">Atualizado com dados reais</span>
+          <span className="text-xs text-slate-400">Separação por fontes de faturamento</span>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5">
-          {/* 1. Total Clientes */}
-          <div
-            onClick={() => onNavigate('clients')}
-            className="p-4 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs hover:border-[#0878D9] transition-all cursor-pointer group"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase text-slate-400">Total Clientes</span>
-              <div className="p-2 rounded-xl bg-blue-500/10 text-[#0878D9] group-hover:bg-[#0878D9] group-hover:text-white transition-colors">
-                <Users className="w-4 h-4" />
-              </div>
-            </div>
-            <p className="text-2xl font-black text-slate-800 dark:text-white mt-2">
-              {metrics.totalClients}
-            </p>
-            <span className="text-[10px] text-slate-400">Na base cadastrada</span>
-          </div>
-
-          {/* 2. Clientes Ativos */}
-          <div
-            onClick={() => onNavigate('clients')}
-            className="p-4 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs hover:border-emerald-500 transition-all cursor-pointer group"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase text-slate-400">Clientes Ativos</span>
-              <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                <UserCheck className="w-4 h-4" />
-              </div>
-            </div>
-            <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-2">
-              {metrics.activeClients}
-            </p>
-            <span className="text-[10px] text-slate-400">Com serviços em vigor</span>
-          </div>
-
-          {/* 3. Clientes Inativos */}
-          <div
-            onClick={() => onNavigate('clients')}
-            className="p-4 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs hover:border-slate-400 transition-all cursor-pointer group"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase text-slate-400">Inativos / Suspensos</span>
-              <div className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 transition-colors">
-                <UserX className="w-4 h-4" />
-              </div>
-            </div>
-            <p className="text-2xl font-black text-slate-600 dark:text-slate-400 mt-2">
-              {metrics.inactiveClients}
-            </p>
-            <span className="text-[10px] text-slate-400">Oportunidade de reativação</span>
-          </div>
-
-          {/* 4. Novos Clientes do Mês */}
-          <div
-            onClick={() => onNavigate('clients')}
-            className="p-4 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs hover:border-[#FF7817] transition-all cursor-pointer group"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase text-slate-400">Novos no Mês</span>
-              <div className="p-2 rounded-xl bg-orange-500/10 text-[#FF7817] group-hover:bg-[#FF7817] group-hover:text-white transition-colors">
-                <UserPlus className="w-4 h-4" />
-              </div>
-            </div>
-            <p className="text-2xl font-black text-[#FF7817] mt-2">
-              +{metrics.newClientsThisMonth}
-            </p>
-            <span className="text-[10px] text-slate-400">Entrada recente</span>
-          </div>
-
-          {/* 5. Receita Recorrente Contratada (MRR) */}
+          {/* MRR Contratada da Agência */}
           <div
             onClick={() => onNavigate('contracts')}
             className="p-4 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs hover:border-[#0878D9] transition-all cursor-pointer group"
           >
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold uppercase text-slate-400">MRR Contratada</span>
-              <div className="p-2 rounded-xl bg-blue-500/10 text-[#0878D9] transition-colors">
-                <DollarSign className="w-4 h-4" />
+              <div className="p-2 rounded-xl bg-blue-500/10 text-[#0878D9]">
+                <FileSignature className="w-4 h-4" />
               </div>
             </div>
             <p className="text-xl font-black text-slate-800 dark:text-white mt-2 truncate">
               {isCollaborator ? 'R$ •••••' : formatCurrency(metrics.mrrContracted)}
             </p>
-            <span className="text-[10px] text-slate-400">Mensalidade nominal ativa</span>
+            <span className="text-[10px] text-slate-400">Mensalidade recorrente nominal</span>
           </div>
 
-          {/* 6. Faturamento Recebido no Mês */}
+          {/* Total Vendido de Produtos */}
           <div
-            onClick={() => onNavigate('financial')}
-            className="p-4 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs hover:border-emerald-500 transition-all cursor-pointer group"
+            onClick={() => onNavigate('products_services')}
+            className="p-4 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs hover:border-[#FF7817] transition-all cursor-pointer group"
           >
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase text-slate-400">Recebido no Mês</span>
-              <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600 transition-colors">
-                <TrendingUp className="w-4 h-4" />
+              <span className="text-[11px] font-bold uppercase text-slate-400">Vendido Produtos</span>
+              <div className="p-2 rounded-xl bg-orange-500/10 text-[#FF7817]">
+                <Package className="w-4 h-4" />
               </div>
             </div>
-            <p className="text-xl font-black text-emerald-600 dark:text-emerald-400 mt-2 truncate">
-              {isCollaborator ? 'R$ •••••' : formatCurrency(metrics.receivedThisMonth)}
+            <p className="text-xl font-black text-[#FF7817] mt-2 truncate">
+              {isCollaborator ? 'R$ •••••' : formatCurrency(metrics.productSalesVolume)}
             </p>
-            <span className="text-[10px] text-slate-400">Liquidados no caixa</span>
+            <span className="text-[10px] text-slate-400">{metrics.productSalesCount} vendas no mês</span>
           </div>
 
-          {/* 7. Valores Pendentes de Recebimento */}
+          {/* Total Vendido de Serviços Avulsos */}
+          <div
+            onClick={() => onNavigate('products_services')}
+            className="p-4 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs hover:border-[#102B59] transition-all cursor-pointer group"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase text-slate-400">Vendido Serviços Avulsos</span>
+              <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-600">
+                <Layers className="w-4 h-4" />
+              </div>
+            </div>
+            <p className="text-xl font-black text-indigo-600 dark:text-indigo-400 mt-2 truncate">
+              {isCollaborator ? 'R$ •••••' : formatCurrency(metrics.serviceSalesVolume)}
+            </p>
+            <span className="text-[10px] text-slate-400">{metrics.serviceSalesCount} serviços avulsos</span>
+          </div>
+
+          {/* A Receber Pendente Total */}
           <div
             onClick={() => onNavigate('financial')}
             className="p-4 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs hover:border-amber-500 transition-all cursor-pointer group"
           >
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase text-slate-400">A Receber no Mês</span>
-              <div className="p-2 rounded-xl bg-amber-500/10 text-amber-600 transition-colors">
+              <span className="text-[11px] font-bold uppercase text-slate-400">A Receber Pendente</span>
+              <div className="p-2 rounded-xl bg-amber-500/10 text-amber-600">
                 <Clock className="w-4 h-4" />
               </div>
             </div>
             <p className="text-xl font-black text-amber-600 dark:text-amber-400 mt-2 truncate">
-              {isCollaborator ? 'R$ •••••' : formatCurrency(metrics.pendingThisMonth)}
+              {isCollaborator ? 'R$ •••••' : formatCurrency(metrics.totalPendingMonth)}
             </p>
-            <span className="text-[10px] text-slate-400">Vencimento a vencer</span>
+            <span className="text-[10px] text-slate-400">Vence no mês atual</span>
           </div>
 
-          {/* 8. Valores Vencidos */}
-          <div
-            onClick={() => onNavigate('financial')}
-            className="p-4 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs hover:border-red-500 transition-all cursor-pointer group"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase text-slate-400">Valores Vencidos</span>
-              <div className="p-2 rounded-xl bg-red-500/10 text-red-600 transition-colors">
-                <AlertTriangle className="w-4 h-4" />
-              </div>
-            </div>
-            <p className="text-xl font-black text-red-600 dark:text-red-400 mt-2 truncate">
-              {isCollaborator ? 'R$ •••••' : formatCurrency(metrics.overdueTotal)}
-            </p>
-            <span className="text-[10px] text-slate-400">Inadimplência acumulada</span>
-          </div>
-
-          {/* 9. Despesas Mensais */}
+          {/* Despesas Pagas */}
           <div
             onClick={() => onNavigate('financial')}
             className="p-4 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs hover:border-rose-500 transition-all cursor-pointer group"
           >
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase text-slate-400">Despesas do Mês</span>
-              <div className="p-2 rounded-xl bg-rose-500/10 text-rose-600 transition-colors">
+              <span className="text-[11px] font-bold uppercase text-slate-400">Despesas Pagas</span>
+              <div className="p-2 rounded-xl bg-rose-500/10 text-rose-600">
                 <ArrowDownRight className="w-4 h-4" />
               </div>
             </div>
             <p className="text-xl font-black text-rose-600 dark:text-rose-400 mt-2 truncate">
               {isCollaborator ? 'R$ •••••' : formatCurrency(metrics.monthlyExpenses)}
             </p>
-            <span className="text-[10px] text-slate-400">Custos operacionais</span>
+            <span className="text-[10px] text-slate-400">Custos operacionais liquidados</span>
           </div>
 
-          {/* 10. Resultado Financeiro */}
+          {/* Resultado Líquido Consolidado */}
           <div
             onClick={() => onNavigate('financial')}
-            className="p-4 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs hover:border-[#0878D9] transition-all cursor-pointer group"
+            className="p-4 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs hover:border-emerald-500 transition-all cursor-pointer group"
           >
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold uppercase text-slate-400">Resultado Líquido</span>
-              <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-600 transition-colors">
+              <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600">
                 <ArrowUpRight className="w-4 h-4" />
               </div>
             </div>
@@ -616,65 +699,79 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             >
               {isCollaborator ? 'R$ •••••' : formatCurrency(metrics.netResult)}
             </p>
-            <span className="text-[10px] text-slate-400">Receitas pagas - Despesas</span>
+            <span className="text-[10px] text-slate-400">Total recebido - Despesas pagas</span>
           </div>
 
-          {/* 11. Contratos Próximos do Vencimento */}
+          {/* Clientes Ativos vs Pausados */}
           <div
-            onClick={() => onNavigate('contracts')}
-            className="p-4 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs hover:border-[#102B59] transition-all cursor-pointer group"
+            onClick={() => onNavigate('clients')}
+            className="p-4 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs hover:border-[#0878D9] transition-all cursor-pointer group"
           >
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase text-slate-400">Contratos a Vencer</span>
-              <div className="p-2 rounded-xl bg-purple-500/10 text-purple-600 transition-colors">
-                <FileSignature className="w-4 h-4" />
+              <span className="text-[11px] font-bold uppercase text-slate-400">Clientes Ativos</span>
+              <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600">
+                <UserCheck className="w-4 h-4" />
               </div>
             </div>
-            <p className="text-2xl font-black text-slate-800 dark:text-white mt-2">
-              {metrics.contractsExpiringSoon}
+            <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-2">
+              {metrics.activeClients}{' '}
+              {metrics.pausedClients > 0 && (
+                <span className="text-xs font-semibold text-amber-500">({metrics.pausedClients} pausados)</span>
+              )}
             </p>
-            <span className="text-[10px] text-slate-400">Próximos 30 dias</span>
+            <span className="text-[10px] text-slate-400">Total cadastrados: {metrics.totalClients}</span>
           </div>
 
-          {/* 12. Aniversariantes do Mês */}
+          {/* Inadimplência Acumulada */}
           <div
-            onClick={() => onNavigate('birthdays')}
-            className="p-4 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs hover:border-[#FF7817] transition-all cursor-pointer group"
+            onClick={() => onNavigate('financial')}
+            className="p-4 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs hover:border-red-500 transition-all cursor-pointer group"
           >
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase text-slate-400">Aniversariantes</span>
-              <div className="p-2 rounded-xl bg-[#FF7817]/10 text-[#FF7817] transition-colors">
-                <Gift className="w-4 h-4" />
+              <span className="text-[11px] font-bold uppercase text-slate-400">Inadimplência</span>
+              <div className="p-2 rounded-xl bg-red-500/10 text-red-600">
+                <AlertTriangle className="w-4 h-4" />
               </div>
             </div>
-            <p className="text-2xl font-black text-[#FF7817] mt-2">
-              {metrics.birthdaysCount}
+            <p className="text-xl font-black text-red-600 dark:text-red-400 mt-2 truncate">
+              {isCollaborator ? 'R$ •••••' : formatCurrency(metrics.overdueTotal)}
             </p>
-            <span className="text-[10px] text-slate-400">Responsáveis neste mês</span>
+            <span className="text-[10px] text-slate-400">Boletos/Cobranças vencidas</span>
           </div>
         </div>
       </div>
 
-      {/* Charts Section: 6 modern graphs */}
+      {/* ==================== 6 GRÁFICOS MODERNOS COM DADOS REAIS ==================== */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Graph 1: Receitas vs Despesas (12 Meses) */}
+        {/* GRÁFICO 1: Proporção das Receitas por Fonte (Pizza/Rosca) */}
         <div className="p-5 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">
-                Receitas versus Despesas (Últimos 12 Meses)
+              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                <PieIcon className="w-4 h-4 text-[#0878D9]" />
+                Proporção das Receitas por Fonte (Mês Atual)
               </h3>
-              <p className="text-xs text-slate-400">Comparativo financeiro mensal</p>
+              <p className="text-xs text-slate-400">Agência (Contratos) vs Produtos vs Serviços Avulsos</p>
             </div>
           </div>
-          <div className="h-64">
+          <div className="h-64 flex items-center justify-center">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={revenue12MonthsData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
+              <PieChart>
+                <Pie
+                  data={revenueSourceDonutData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={90}
+                  paddingAngle={5}
+                  dataKey="value"
+                >
+                  {revenueSourceDonutData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
                 <Tooltip
-                  formatter={(value: any) => formatCurrency(Number(value))}
+                  formatter={(val: any) => formatCurrency(Number(val))}
                   contentStyle={{
                     backgroundColor: '#10192A',
                     color: '#fff',
@@ -683,80 +780,30 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   }}
                 />
                 <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }} />
-                <Bar dataKey="receita" name="Receita Recebida" fill="#0878D9" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="despesa" name="Despesa Paga" fill="#FF7817" radius={[4, 4, 0, 0]} />
-              </BarChart>
+              </PieChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        {/* Graph 2: Clientes por Plano */}
+        {/* GRÁFICO 2: Evolução Mensal do Faturamento por Fonte (12 Meses) */}
         <div className="p-5 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">
-                Distribuição de Clientes por Plano
+              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                <BarChart2 className="w-4 h-4 text-[#FF7817]" />
+                Evolução Mensal do Faturamento por Fonte (12 Meses)
               </h3>
-              <p className="text-xs text-slate-400">Start Bronze, Prata Plus, Gold & Personalizado</p>
-            </div>
-          </div>
-          <div className="h-64 flex items-center justify-center">
-            {clientsByPlanData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={clientsByPlanData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={55}
-                    outerRadius={85}
-                    paddingAngle={4}
-                    dataKey="value"
-                  >
-                    {clientsByPlanData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#10192A',
-                      color: '#fff',
-                      borderRadius: '12px',
-                      border: 'none',
-                    }}
-                  />
-                  <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }} />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <p className="text-xs text-slate-400">Nenhum plano alocado ainda.</p>
-            )}
-          </div>
-        </div>
-
-        {/* Graph 3: Evolução da Carteira de Clientes */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">
-                Evolução da Carteira de Clientes
-              </h3>
-              <p className="text-xs text-slate-400">Crescimento cumulativo nos últimos meses</p>
+              <p className="text-xs text-slate-400">Histórico detalhado por categoria de receita</p>
             </div>
           </div>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={clientEvolutionData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="clientColor" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#0878D9" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="#0878D9" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
+              <BarChart data={monthlyEvolutionBySource} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
                 <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip
+                  formatter={(val: any) => formatCurrency(Number(val))}
                   contentStyle={{
                     backgroundColor: '#10192A',
                     color: '#fff',
@@ -764,42 +811,151 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     border: 'none',
                   }}
                 />
-                <Area
-                  type="monotone"
-                  dataKey="clientes"
-                  name="Total de Clientes"
-                  stroke="#0878D9"
-                  strokeWidth={3}
-                  fillOpacity={1}
-                  fill="url(#clientColor)"
+                <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
+                <Bar dataKey="agencia" name="Agência (Contratos)" stackId="a" fill="#0878D9" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="produtos" name="Produtos" stackId="a" fill="#FF7817" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="servicos" name="Serviços Avulsos" stackId="a" fill="#102B59" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* GRÁFICO 3: Vendas de Produtos vs Serviços Avulsos (Vendido vs Recebido) */}
+        <div className="p-5 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                Produtos vs Serviços Avulsos (Vendido vs Recebido)
+              </h3>
+              <p className="text-xs text-slate-400">Volume total emitido em vendas versus valores compensados</p>
+            </div>
+          </div>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={productsVsServicesData} margin={{ top: 10, right: 15, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                <XAxis dataKey="categoria" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip
+                  formatter={(val: any) => formatCurrency(Number(val))}
+                  contentStyle={{
+                    backgroundColor: '#10192A',
+                    color: '#fff',
+                    borderRadius: '12px',
+                    border: 'none',
+                  }}
                 />
+                <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }} />
+                <Bar dataKey="vendido" name="Total Vendido (Emitido)" fill="#102B59" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="recebido" name="Total Recebido (Compensado)" fill="#10B981" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* GRÁFICO 4: Receita da Agência vs Vendas Avulsas */}
+        <div className="p-5 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                Receitas da Agência vs Vendas Avulsas
+              </h3>
+              <p className="text-xs text-slate-400">Comparação direta de arrecadação no mês</p>
+            </div>
+          </div>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={agencyVsStandaloneData} layout="vertical" margin={{ top: 10, right: 20, left: 40, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                <XAxis type="number" tick={{ fontSize: 11 }} />
+                <YAxis type="category" dataKey="tipo" tick={{ fontSize: 11 }} width={140} />
+                <Tooltip
+                  formatter={(val: any) => formatCurrency(Number(val))}
+                  contentStyle={{
+                    backgroundColor: '#10192A',
+                    color: '#fff',
+                    borderRadius: '12px',
+                    border: 'none',
+                  }}
+                />
+                <Bar dataKey="valor" name="Recebido (R$)" fill="#0878D9" radius={[0, 6, 6, 0]}>
+                  {agencyVsStandaloneData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.fill} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* GRÁFICO 5: Faturamento Consolidado vs Despesas (12 Meses) */}
+        <div className="p-5 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                Faturamento Consolidado versus Despesas
+              </h3>
+              <p className="text-xs text-slate-400">Total arrecadado em todas as fontes versus custos pagos</p>
+            </div>
+          </div>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={monthlyEvolutionBySource} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="totalRevenueColor" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#0878D9" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="#0878D9" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="expenseColor" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#EF4444" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="#EF4444" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip
+                  formatter={(val: any) => formatCurrency(Number(val))}
+                  contentStyle={{
+                    backgroundColor: '#10192A',
+                    color: '#fff',
+                    borderRadius: '12px',
+                    border: 'none',
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }} />
+                <Area type="monotone" dataKey="total" name="Total Recebido" stroke="#0878D9" strokeWidth={2.5} fill="url(#totalRevenueColor)" />
+                <Area type="monotone" dataKey="despesa" name="Despesas Pagas" stroke="#EF4444" strokeWidth={2} fill="url(#expenseColor)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        {/* Graph 4: Serviços Mais Contratados */}
+        {/* GRÁFICO 6: Produtos e Serviços Mais Vendidos */}
         <div className="p-5 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">
-                Serviços Mais Contratados
+                Itens Mais Vendidos (Produtos & Serviços Avulsos)
               </h3>
-              <p className="text-xs text-slate-400">Mapeamento de demanda da Agência Raon</p>
+              <p className="text-xs text-slate-400">Ranking por faturamento bruto gerado</p>
             </div>
+            <button
+              onClick={() => onNavigate('products_services')}
+              className="text-xs font-bold text-[#FF7817] hover:underline"
+            >
+              Ver todos
+            </button>
           </div>
           <div className="h-64">
-            {topServicesData.length > 0 ? (
+            {topSellingItemsData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={topServicesData}
-                  layout="vertical"
-                  margin={{ top: 10, right: 20, left: 30, bottom: 0 }}
-                >
+                <BarChart data={topSellingItemsData} layout="vertical" margin={{ top: 10, right: 20, left: 30, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+                  <XAxis type="number" tick={{ fontSize: 11 }} />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={120} />
                   <Tooltip
+                    formatter={(val: any) => formatCurrency(Number(val))}
                     contentStyle={{
                       backgroundColor: '#10192A',
                       color: '#fff',
@@ -807,100 +963,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       border: 'none',
                     }}
                   />
-                  <Bar dataKey="count" name="Contratos" fill="#102B59" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="total" name="Total Vendido (R$)" fill="#FF7817" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-full flex items-center justify-center text-xs text-slate-400">
-                Nenhum serviço mapeado ainda.
+              <div className="h-full flex flex-col items-center justify-center text-xs text-slate-400 gap-2">
+                <ShoppingBag className="w-8 h-8 text-slate-300 dark:text-slate-700" />
+                <span>Nenhuma venda de produto ou serviço avulso registrada ainda.</span>
+                <button
+                  onClick={() => onNavigate('products_services')}
+                  className="px-3 py-1.5 rounded-lg bg-[#FF7817] text-white font-bold text-xs"
+                >
+                  + Fazer primeiro lançamento
+                </button>
               </div>
             )}
-          </div>
-        </div>
-      </div>
-
-      {/* Priority Alerts Section */}
-      <div className="p-5 rounded-2xl bg-amber-500/10 border border-amber-500/20 dark:bg-amber-950/20">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400" />
-            <h3 className="font-bold text-sm text-amber-900 dark:text-amber-200">
-              Alertas Prioritários de Gestão
-            </h3>
-          </div>
-          <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">
-            Ações Imediatas
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {/* Alert 1 */}
-          <div className="p-3.5 bg-white dark:bg-[#10192A] rounded-xl border border-amber-200 dark:border-amber-900/40 flex items-start gap-3">
-            <div className="p-2 rounded-lg bg-red-500/10 text-red-600">
-              <DollarSign className="w-4 h-4" />
-            </div>
-            <div>
-              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                {metrics.overdueTotal > 0 ? 'Inadimplência Ativa' : 'Cobranças em Dia'}
-              </h4>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                {metrics.overdueTotal > 0
-                  ? `Total de ${formatCurrency(metrics.overdueTotal)} aguardando quitação.`
-                  : 'Nenhuma cobrança vencida registrada.'}
-              </p>
-              {metrics.overdueTotal > 0 && (
-                <button
-                  onClick={() => onNavigate('financial')}
-                  className="mt-2 text-xs font-bold text-[#0878D9] flex items-center gap-1 hover:underline"
-                >
-                  Cobrar no WhatsApp <ChevronRight className="w-3 h-3" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Alert 2 */}
-          <div className="p-3.5 bg-white dark:bg-[#10192A] rounded-xl border border-amber-200 dark:border-amber-900/40 flex items-start gap-3">
-            <div className="p-2 rounded-lg bg-[#FF7817]/10 text-[#FF7817]">
-              <Gift className="w-4 h-4" />
-            </div>
-            <div>
-              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                Aniversários da Semana
-              </h4>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                {metrics.birthdaysCount} clientes com aniversário em novembro.
-              </p>
-              <button
-                onClick={() => onNavigate('birthdays')}
-                className="mt-2 text-xs font-bold text-[#FF7817] flex items-center gap-1 hover:underline"
-              >
-                Ver Aniversariantes <ChevronRight className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-
-          {/* Alert 3 */}
-          <div className="p-3.5 bg-white dark:bg-[#10192A] rounded-xl border border-amber-200 dark:border-amber-900/40 flex items-start gap-3">
-            <div className="p-2 rounded-lg bg-blue-500/10 text-[#0878D9]">
-              <FileSignature className="w-4 h-4" />
-            </div>
-            <div>
-              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                Ciclos de Contrato
-              </h4>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                {metrics.contractsExpiringSoon > 0
-                  ? `${metrics.contractsExpiringSoon} contratos encerram nos próximos 30 dias.`
-                  : 'Todos os contratos vigentes com prazo regular.'}
-              </p>
-              <button
-                onClick={() => onNavigate('contracts')}
-                className="mt-2 text-xs font-bold text-[#0878D9] flex items-center gap-1 hover:underline"
-              >
-                Revisar Contratos <ChevronRight className="w-3 h-3" />
-              </button>
-            </div>
           </div>
         </div>
       </div>

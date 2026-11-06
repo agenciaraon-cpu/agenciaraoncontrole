@@ -14,6 +14,7 @@ import { DocumentsView } from './views/DocumentsView';
 import { ReportsView } from './views/ReportsView';
 import { SettingsView } from './views/SettingsView';
 import { LoginView } from './views/LoginView';
+import { ProductsServicesView } from './views/ProductsServicesView';
 import {
   ActiveTab,
   Client,
@@ -27,6 +28,9 @@ import {
   AppDocument,
   NotificationItem,
   ContactLog,
+  ProductService,
+  ProductCategory,
+  Sale,
 } from './types';
 import {
   seedInitialDataIfEmpty,
@@ -41,6 +45,9 @@ import {
   getDocuments,
   getNotifications,
   getContactLogs,
+  getProductsServices,
+  getProductCategories,
+  getSales,
 } from './services/db';
 import { testFirestoreConnection } from './lib/firebase';
 
@@ -63,6 +70,9 @@ const AppContent: React.FC = () => {
   const [documents, setDocuments] = useState<AppDocument[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [contactLogs, setContactLogs] = useState<ContactLog[]>([]);
+  const [productsServices, setProductsServices] = useState<ProductService[]>([]);
+  const [productCategories, setProductCategories] = useState<ProductCategory[]>([]);
+  const [sales, setSales] = useState<Sale[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
 
   // Load all operational data
@@ -83,6 +93,9 @@ const AppContent: React.FC = () => {
         dList,
         nList,
         logList,
+        psList,
+        pcList,
+        salesList,
       ] = await Promise.all([
         getClients().catch(() => []),
         getServices().catch(() => []),
@@ -95,6 +108,9 @@ const AppContent: React.FC = () => {
         getDocuments().catch(() => []),
         getNotifications().catch(() => []),
         getContactLogs().catch(() => []),
+        getProductsServices().catch(() => []),
+        getProductCategories().catch(() => []),
+        getSales().catch(() => []),
       ]);
 
       setClients(cList || []);
@@ -108,6 +124,9 @@ const AppContent: React.FC = () => {
       setDocuments(dList || []);
       setNotifications(nList || []);
       setContactLogs(logList || []);
+      setProductsServices(psList || []);
+      setProductCategories(pcList || []);
+      setSales(salesList || []);
     } catch (err) {
       console.error('Erro ao sincronizar dados operacionais:', err);
     } finally {
@@ -203,6 +222,8 @@ const AppContent: React.FC = () => {
                   contracts={contracts}
                   receivables={receivables}
                   expenses={expenses}
+                  sales={sales}
+                  productsServices={productsServices}
                   onNavigate={setCurrentTab}
                   onRefresh={loadAllData}
                 />
@@ -243,6 +264,16 @@ const AppContent: React.FC = () => {
                   expenses={expenses}
                   categories={categories}
                   clients={clients}
+                  sales={sales}
+                  onRefresh={loadAllData}
+                />
+              )}
+
+              {currentTab === 'products_services' && (
+                <ProductsServicesView
+                  productsServices={productsServices}
+                  productCategories={productCategories}
+                  sales={sales}
                   onRefresh={loadAllData}
                 />
               )}
@@ -278,6 +309,8 @@ const AppContent: React.FC = () => {
                   receivables={receivables}
                   expenses={expenses}
                   tasks={tasks}
+                  sales={sales}
+                  productsServices={productsServices}
                 />
               )}
 

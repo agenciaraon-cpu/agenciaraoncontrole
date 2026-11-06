@@ -18,12 +18,15 @@ import {
   ChevronDown,
   Sparkles,
   Layers,
+  Briefcase,
+  Package,
 } from 'lucide-react';
 import { Receivable, Expense, FinancialCategory, Client, ReceivableStatus, ExpenseStatus } from '../types';
 import {
   createReceivable,
   updateReceivable,
   registerReceivablePayment,
+  confirmSalePayment,
   createExpense,
   updateExpense,
   deleteExpense,
@@ -36,6 +39,7 @@ interface FinancialViewProps {
   expenses: Expense[];
   categories: FinancialCategory[];
   clients: Client[];
+  sales?: any[];
   onRefresh: () => void;
 }
 
@@ -44,6 +48,7 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
   expenses,
   categories,
   clients,
+  sales = [],
   onRefresh,
 }) => {
   const { user, isAdmin } = useAuth();
@@ -54,6 +59,7 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
   const currentYear = now.getFullYear();
   const [selectedCompetence, setSelectedCompetence] = useState<string>(`${currentMonthNum}/${currentYear}`);
   const [statusFilter, setStatusFilter] = useState<string>('todos');
+  const [sourceFilter, setSourceFilter] = useState<'todas' | 'agencia' | 'produto' | 'servico_avulso'>('todas');
   const [searchTerm, setSearchTerm] = useState('');
 
   // Modals
@@ -102,7 +108,7 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0);
   };
 
-  // Filtered Receivables
+  // Filtered Receivables with source filter
   const filteredReceivables = useMemo(() => {
     return receivables.filter((r) => {
       const matchComp = selectedCompetence === 'todas' || r.competence === selectedCompetence;
@@ -110,9 +116,13 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
       const matchSearch =
         r.clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         r.description.toLowerCase().includes(searchTerm.toLowerCase());
-      return matchComp && matchStatus && matchSearch;
+      
+      const rSource = r.revenueSource || (r.saleId ? 'produto' : 'agencia');
+      const matchSource = sourceFilter === 'todas' || rSource === sourceFilter;
+
+      return matchComp && matchStatus && matchSearch && matchSource;
     });
-  }, [receivables, selectedCompetence, statusFilter, searchTerm]);
+  }, [receivables, selectedCompetence, statusFilter, searchTerm, sourceFilter]);
 
   // Filtered Expenses
   const filteredExpenses = useMemo(() => {
@@ -140,6 +150,19 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
       .filter((r) => r.status === 'recebido' || r.status === 'parcial')
       .reduce((acc, r) => acc + (Number(r.paidAmount) || 0), 0);
 
+    // Source breakdown of received funds
+    const totalRecebidoAgencia = recsInComp
+      .filter((r) => (r.revenueSource === 'agencia' || (!r.revenueSource && !r.saleId)) && (r.status === 'recebido' || r.status === 'parcial'))
+      .reduce((acc, r) => acc + (Number(r.paidAmount) || 0), 0);
+
+    const totalRecebidoProdutos = recsInComp
+      .filter((r) => r.revenueSource === 'produto' && (r.status === 'recebido' || r.status === 'parcial'))
+      .reduce((acc, r) => acc + (Number(r.paidAmount) || 0), 0);
+
+    const totalRecebidoServicos = recsInComp
+      .filter((r) => r.revenueSource === 'servico_avulso' && (r.status === 'recebido' || r.status === 'parcial'))
+      .reduce((acc, r) => acc + (Number(r.paidAmount) || 0), 0);
+
     const totalPendenteEntradas = recsInComp
       .filter((r) => r.status === 'pendente')
       .reduce((acc, r) => acc + (Number(r.originalAmount) || 0), 0);
@@ -159,6 +182,9 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
     return {
       totalPrevistoEntradas,
       totalRecebidoEntradas,
+      totalRecebidoAgencia,
+      totalRecebidoProdutos,
+      totalRecebidoServicos,
       totalPendenteEntradas,
       totalVencidoEntradas,
       totalPrevistoSaidas,
@@ -182,6 +208,17 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
         user?.email || 'somosraon@gmail.com',
         paymentNotes
       );
+
+      // If this receivable is linked to a standalone sale, also confirm sale payment
+      if (selectedReceivableForPayment.saleId) {
+        await confirmSalePayment(
+          selectedReceivableForPayment.saleId,
+          Number(paymentAmount),
+          paymentDate,
+          user?.email || 'somosraon@gmail.com'
+        );
+      }
+
       setIsPaymentModalOpen(false);
       setSelectedReceivableForPayment(null);
       onRefresh();
@@ -429,61 +466,138 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
 
       {/* ==================== SUB-TAB 1: CONTAS A RECEBER ==================== */}
       {activeSubTab === 'receber' && (
-        <div className="overflow-hidden rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-[11px] font-black uppercase text-slate-500">
-                <th className="py-3 px-4">Cliente / Descrição</th>
-                <th className="py-3 px-4">Competência</th>
-                <th className="py-3 px-4">Vencimento</th>
-                <th className="py-3 px-4">Valor Original</th>
-                <th className="py-3 px-4">Valor Pago</th>
-                <th className="py-3 px-4">Status</th>
-                <th className="py-3 px-4 text-right">Ações & WhatsApp</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {filteredReceivables.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-400">
-                    Nenhum recebível registrado nesta competência.
-                  </td>
-                </tr>
-              ) : (
-                filteredReceivables.map((r) => {
-                  const statusColors: Record<ReceivableStatus, string> = {
-                    recebido: 'bg-emerald-500/10 text-emerald-600',
-                    pendente: 'bg-amber-500/10 text-amber-600',
-                    parcial: 'bg-blue-500/10 text-[#0878D9]',
-                    vencido: 'bg-red-500/10 text-red-600',
-                    cancelado: 'bg-slate-500/10 text-slate-400',
-                  };
+        <div className="space-y-3.5">
+          {/* Source Filter Switcher (Fonte A, Fonte B, Fonte C, Todas) */}
+          <div className="p-3 bg-white dark:bg-[#10192A] rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2.5 shadow-xs">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs font-bold text-slate-400 mr-1 flex items-center gap-1">
+                <Filter className="w-3.5 h-3.5" />
+                Fonte de Receita:
+              </span>
+              <button
+                onClick={() => setSourceFilter('todas')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  sourceFilter === 'todas'
+                    ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                }`}
+              >
+                Todas as Receitas
+              </button>
+              <button
+                onClick={() => setSourceFilter('agencia')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  sourceFilter === 'agencia'
+                    ? 'bg-[#0878D9] text-white shadow-xs'
+                    : 'bg-blue-50 dark:bg-blue-950/40 text-[#0878D9] hover:bg-blue-100'
+                }`}
+              >
+                <Briefcase className="w-3.5 h-3.5" />
+                Contratos da Agência (Fonte A)
+              </button>
+              <button
+                onClick={() => setSourceFilter('produto')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  sourceFilter === 'produto'
+                    ? 'bg-[#FF7817] text-white shadow-xs'
+                    : 'bg-orange-50 dark:bg-orange-950/40 text-[#FF7817] hover:bg-orange-100'
+                }`}
+              >
+                <Package className="w-3.5 h-3.5" />
+                Produtos (Fonte B)
+              </button>
+              <button
+                onClick={() => setSourceFilter('servico_avulso')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  sourceFilter === 'servico_avulso'
+                    ? 'bg-[#102B59] text-white shadow-xs'
+                    : 'bg-slate-100 dark:bg-slate-800 text-[#102B59] dark:text-slate-300 hover:bg-slate-200'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                Serviços Avulsos (Fonte C)
+              </button>
+            </div>
 
-                  return (
-                    <tr key={r.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
-                      <td className="py-3 px-4">
-                        <div className="font-bold text-slate-800 dark:text-slate-200">
-                          {r.clientName}
-                        </div>
-                        <div className="text-[11px] text-slate-400">{r.description}</div>
-                      </td>
-                      <td className="py-3 px-4 font-mono font-semibold">{r.competence}</td>
-                      <td className="py-3 px-4">{r.dueDate}</td>
-                      <td className="py-3 px-4 font-bold text-slate-800 dark:text-white">
-                        {formatCurrency(r.originalAmount)}
-                      </td>
-                      <td className="py-3 px-4 font-bold text-emerald-600">
-                        {formatCurrency(r.paidAmount || 0)}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span
-                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                            statusColors[r.status] || statusColors.pendente
-                          }`}
-                        >
-                          {r.status}
-                        </span>
-                      </td>
+            <div className="text-xs font-bold text-slate-500">
+              Mostrando <strong>{filteredReceivables.length}</strong> cobranças
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-[11px] font-black uppercase text-slate-500">
+                  <th className="py-3 px-4">Cliente / Origem / Descrição</th>
+                  <th className="py-3 px-4">Competência</th>
+                  <th className="py-3 px-4">Vencimento</th>
+                  <th className="py-3 px-4">Valor Original</th>
+                  <th className="py-3 px-4">Valor Pago</th>
+                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4 text-right">Ações & WhatsApp</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {filteredReceivables.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-12 text-center text-slate-400">
+                      Nenhum recebível registrado nesta categoria/competência.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredReceivables.map((r) => {
+                    const statusColors: Record<ReceivableStatus, string> = {
+                      recebido: 'bg-emerald-500/10 text-emerald-600',
+                      pendente: 'bg-amber-500/10 text-amber-600',
+                      parcial: 'bg-blue-500/10 text-[#0878D9]',
+                      vencido: 'bg-red-500/10 text-red-600',
+                      cancelado: 'bg-slate-500/10 text-slate-400',
+                    };
+
+                    const rSource = r.revenueSource || (r.saleId ? 'produto' : 'agencia');
+
+                    return (
+                      <tr key={r.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-slate-800 dark:text-slate-200">
+                              {r.clientName}
+                            </span>
+                            {rSource === 'produto' && (
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-orange-500/10 text-[#FF7817] border border-orange-500/20 inline-flex items-center gap-1">
+                                <Package className="w-2.5 h-2.5" /> Produto
+                              </span>
+                            )}
+                            {rSource === 'servico_avulso' && (
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 inline-flex items-center gap-1">
+                                <Layers className="w-2.5 h-2.5" /> Serviço Avulso
+                              </span>
+                            )}
+                            {rSource === 'agencia' && (
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-500/10 text-[#0878D9] border border-blue-500/20 inline-flex items-center gap-1">
+                                <Briefcase className="w-2.5 h-2.5" /> Agência
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-400 mt-0.5">{r.description}</div>
+                        </td>
+                        <td className="py-3 px-4 font-mono font-semibold">{r.competence}</td>
+                        <td className="py-3 px-4">{r.dueDate}</td>
+                        <td className="py-3 px-4 font-bold text-slate-800 dark:text-white">
+                          {formatCurrency(r.originalAmount)}
+                        </td>
+                        <td className="py-3 px-4 font-bold text-emerald-600">
+                          {formatCurrency(r.paidAmount || 0)}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span
+                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                              statusColors[r.status] || statusColors.pendente
+                            }`}
+                          >
+                            {r.status}
+                          </span>
+                        </td>
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
                           {/* WhatsApp button */}
@@ -518,7 +632,8 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
             </tbody>
           </table>
         </div>
-      )}
+      </div>
+    )}
 
       {/* ==================== SUB-TAB 2: CONTAS A PAGAR ==================== */}
       {activeSubTab === 'pagar' && (

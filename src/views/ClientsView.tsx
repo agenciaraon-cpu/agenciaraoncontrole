@@ -23,10 +23,20 @@ import {
   Trash2,
   Send,
   Sparkles,
+  PauseCircle,
+  PlayCircle,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Client, ClientStatus, Contract, Receivable, Task, AppDocument, ContactLog } from '../types';
-import { createClient, updateClient, deleteClient, createContract, registerReceivablePayment } from '../services/db';
+import {
+  createClient,
+  updateClient,
+  deleteClient,
+  pauseClient,
+  reactivateClient,
+  createContract,
+  registerReceivablePayment,
+} from '../services/db';
 import { useAuth } from '../context/AuthContext';
 import { WhatsAppModal, WhatsAppTemplateKey } from '../components/common/WhatsAppModal';
 
@@ -64,6 +74,17 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
   // Deletion Modal state
   const [clientToDelete, setClientToDelete] = useState<Client | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Pause / Deactivate Modal state
+  const [clientToPause, setClientToPause] = useState<Client | null>(null);
+  const [pauseReason, setPauseReason] = useState('');
+  const [suspendBilling, setSuspendBilling] = useState(true);
+  const [isPausing, setIsPausing] = useState(false);
+
+  // Reactivate Modal state
+  const [clientToReactivate, setClientToReactivate] = useState<Client | null>(null);
+  const [resumedBillingDate, setResumedBillingDate] = useState(new Date().toISOString().split('T')[0]);
+  const [isReactivating, setIsReactivating] = useState(false);
 
   // Form State for New Client
   const [formData, setFormData] = useState({
@@ -147,6 +168,58 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
       alert('Erro ao excluir cliente: ' + (err?.message || 'Tente novamente.'));
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handlePauseClient = async () => {
+    if (!clientToPause) return;
+    setIsPausing(true);
+    try {
+      const userEmail = user?.email || 'agenciaraon@gmail.com';
+      await pauseClient(
+        clientToPause.id,
+        clientToPause.companyName,
+        pauseReason,
+        suspendBilling,
+        userEmail
+      );
+      alert(`Cliente ${clientToPause.companyName} pausado com sucesso. Todos os contratos e histórico foram preservados.`);
+      setClientToPause(null);
+      setPauseReason('');
+      if (selectedClientForDetail?.id === clientToPause.id) {
+        setSelectedClientForDetail(null);
+      }
+      onRefresh();
+    } catch (err: any) {
+      console.error('Erro ao pausar cliente:', err);
+      alert('Erro ao pausar cliente: ' + (err?.message || 'Tente novamente.'));
+    } finally {
+      setIsPausing(false);
+    }
+  };
+
+  const handleReactivateClient = async () => {
+    if (!clientToReactivate) return;
+    setIsReactivating(true);
+    try {
+      const userEmail = user?.email || 'agenciaraon@gmail.com';
+      await reactivateClient(
+        clientToReactivate.id,
+        clientToReactivate.companyName,
+        resumedBillingDate,
+        userEmail
+      );
+      alert(`Cliente ${clientToReactivate.companyName} reativado com sucesso!`);
+      setClientToReactivate(null);
+      if (selectedClientForDetail?.id === clientToReactivate.id) {
+        setSelectedClientForDetail(null);
+      }
+      onRefresh();
+    } catch (err: any) {
+      console.error('Erro ao reativar cliente:', err);
+      alert('Erro ao reativar cliente: ' + (err?.message || 'Tente novamente.'));
+    } finally {
+      setIsReactivating(false);
     }
   };
 
@@ -276,7 +349,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
         <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto">
           <Filter className="w-4 h-4 text-slate-400 shrink-0" />
           <span className="text-xs font-bold text-slate-500 shrink-0">Status:</span>
-          {(['todos', 'ativo', 'inativo', 'suspenso', 'cancelado'] as const).map((st) => (
+          {(['todos', 'ativo', 'pausado', 'inativo', 'suspenso', 'cancelado'] as const).map((st) => (
             <button
               key={st}
               onClick={() => setStatusFilter(st)}
@@ -286,7 +359,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
               }`}
             >
-              {st}
+              {st === 'pausado' ? 'Pausados' : st}
             </button>
           ))}
         </div>
@@ -318,6 +391,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                 filteredClients.map((client) => {
                   const statusStyles: Record<ClientStatus, string> = {
                     ativo: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
+                    pausado: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30',
                     inativo: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/30',
                     suspenso: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30',
                     cancelado: 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30',
@@ -342,6 +416,11 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                           <span>{client.responsibleName}</span>
                           {client.instagram && (
                             <span className="text-[#0878D9]">{client.instagram}</span>
+                          )}
+                          {client.status === 'pausado' && client.pausedAt && (
+                            <span className="text-amber-600 font-semibold text-[10px]">
+                              (Pausado em {client.pausedAt})
+                            </span>
                           )}
                         </div>
                       </td>
@@ -388,6 +467,32 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                           >
                             <MessageCircle className="w-4 h-4" />
                           </button>
+
+                          {/* Quick Pause / Reactivate Button */}
+                          {client.status === 'ativo' ? (
+                            <button
+                              onClick={() => {
+                                setClientToPause(client);
+                                setPauseReason('');
+                                setSuspendBilling(true);
+                              }}
+                              className="p-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500 text-amber-600 hover:text-white transition-all shadow-xs"
+                              title={`Desativar / Pausar ${client.companyName}`}
+                            >
+                              <PauseCircle className="w-4 h-4" />
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setClientToReactivate(client);
+                                setResumedBillingDate(new Date().toISOString().split('T')[0]);
+                              }}
+                              className="p-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-600 text-emerald-600 hover:text-white transition-all shadow-xs"
+                              title={`Reativar ${client.companyName}`}
+                            >
+                              <PlayCircle className="w-4 h-4" />
+                            </button>
+                          )}
 
                           {/* Full Client File Trigger */}
                           <button
@@ -710,6 +815,151 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
         </div>
       )}
 
+      {/* ==================== MODAL: DESATIVAR / PAUSAR CLIENTE ==================== */}
+      {clientToPause && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+          <div className="relative w-full max-w-md bg-white dark:bg-[#10192A] rounded-2xl shadow-2xl border border-amber-200 dark:border-amber-900/50 overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 bg-amber-500 text-white">
+              <div className="flex items-center gap-2">
+                <PauseCircle className="w-5 h-5 text-white" />
+                <h3 className="font-bold text-base">Desativar / Pausar Cliente</h3>
+              </div>
+              <button
+                onClick={() => setClientToPause(null)}
+                className="p-1 text-amber-100 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="p-3 bg-amber-50 dark:bg-amber-950/30 rounded-xl border border-amber-200 dark:border-amber-900/40 text-xs text-amber-800 dark:text-amber-200">
+                <p className="font-bold text-sm mb-1">{clientToPause.companyName}</p>
+                <p className="text-slate-600 dark:text-slate-400">
+                  Código: <span className="font-mono font-bold text-amber-700 dark:text-amber-300">{clientToPause.code}</span> | Responsável: {clientToPause.responsibleName}
+                </p>
+              </div>
+
+              <div className="p-3 bg-blue-50 dark:bg-blue-950/30 rounded-xl border border-blue-200 dark:border-blue-900/40 text-[11px] text-blue-900 dark:text-blue-200">
+                <p className="font-bold mb-1">Preservação Integral de Dados:</p>
+                <p>Todos os contratos, histórico financeiro, tarefas e documentos existentes serão mantidos intactos. Nenhuma informação será apagada.</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
+                  Motivo da Pausa / Desativação
+                </label>
+                <textarea
+                  rows={3}
+                  value={pauseReason}
+                  onChange={(e) => setPauseReason(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-medium"
+                  placeholder="Ex: Recesso do cliente, pausa estratégica para reformas, etc."
+                />
+              </div>
+
+              <div className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                <input
+                  type="checkbox"
+                  id="suspendBillingCheck"
+                  checked={suspendBilling}
+                  onChange={(e) => setSuspendBilling(e.target.checked)}
+                  className="mt-0.5 rounded text-[#0878D9] focus:ring-[#0878D9]"
+                />
+                <label htmlFor="suspendBillingCheck" className="text-xs text-slate-700 dark:text-slate-300 font-medium">
+                  <strong>Suspender novos faturamentos recorrentes futuros</strong> durante o período de pausa (cobranças vencidas anteriores continuam registradas).
+                </label>
+              </div>
+
+              <div className="space-y-2 pt-1">
+                <button
+                  type="button"
+                  disabled={isPausing}
+                  onClick={handlePauseClient}
+                  className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-colors disabled:opacity-50"
+                >
+                  <PauseCircle className="w-4 h-4" />
+                  <span>{isPausing ? 'Desativando...' : 'Confirmar Desativação do Cliente (Pausar)'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setClientToPause(null)}
+                  className="w-full py-2 px-4 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL: REATIVAR CLIENTE ==================== */}
+      {clientToReactivate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+          <div className="relative w-full max-w-md bg-white dark:bg-[#10192A] rounded-2xl shadow-2xl border border-emerald-200 dark:border-emerald-900/50 overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 bg-emerald-600 text-white">
+              <div className="flex items-center gap-2">
+                <PlayCircle className="w-5 h-5 text-white" />
+                <h3 className="font-bold text-base">Reativar Cliente</h3>
+              </div>
+              <button
+                onClick={() => setClientToReactivate(null)}
+                className="p-1 text-emerald-100 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 rounded-xl border border-emerald-200 dark:border-emerald-900/40 text-xs text-emerald-800 dark:text-emerald-200">
+                <p className="font-bold text-sm mb-1">{clientToReactivate.companyName}</p>
+                <p className="text-slate-600 dark:text-slate-400">
+                  Código: <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300">{clientToReactivate.code}</span> | Responsável: {clientToReactivate.responsibleName}
+                </p>
+              </div>
+
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                Ao reativar, o cliente voltará ao status <strong>Ativo</strong> e passará a constar normalmente nos relatórios e faturamentos recorrentes da Agência Raon.
+              </p>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
+                  Data de Retorno do Faturamento Recorrente
+                </label>
+                <input
+                  type="date"
+                  value={resumedBillingDate}
+                  onChange={(e) => setResumedBillingDate(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-medium"
+                />
+              </div>
+
+              <div className="space-y-2 pt-1">
+                <button
+                  type="button"
+                  disabled={isReactivating}
+                  onClick={handleReactivateClient}
+                  className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-colors disabled:opacity-50"
+                >
+                  <PlayCircle className="w-4 h-4" />
+                  <span>{isReactivating ? 'Reativando...' : 'Confirmar Reativação do Cliente'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setClientToReactivate(null)}
+                  className="w-full py-2 px-4 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ==================== FICHA INDIVIDUAL DO CLIENTE (7 ABAS OBRIGATÓRIAS) ==================== */}
       {selectedClientForDetail && (
         <ClientDetailModal
@@ -723,6 +973,15 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
           onOpenWhatsApp={(tpl) => handleOpenWhatsApp(selectedClientForDetail, tpl)}
           onRefresh={onRefresh}
           onRequestDelete={(client) => setClientToDelete(client)}
+          onRequestPause={(client) => {
+            setClientToPause(client);
+            setPauseReason('');
+            setSuspendBilling(true);
+          }}
+          onRequestReactivate={(client) => {
+            setClientToReactivate(client);
+            setResumedBillingDate(new Date().toISOString().split('T')[0]);
+          }}
         />
       )}
 
@@ -759,6 +1018,8 @@ interface ClientDetailModalProps {
   onOpenWhatsApp: (tpl?: WhatsAppTemplateKey) => void;
   onRefresh: () => void;
   onRequestDelete?: (client: Client) => void;
+  onRequestPause?: (client: Client) => void;
+  onRequestReactivate?: (client: Client) => void;
 }
 
 const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
@@ -772,6 +1033,8 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
   onOpenWhatsApp,
   onRefresh,
   onRequestDelete,
+  onRequestPause,
+  onRequestReactivate,
 }) => {
   const { user, isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState<
@@ -919,6 +1182,32 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
           {/* TAB 1: DADOS GERAIS */}
           {activeTab === 'dados' && (
             <div className="space-y-4">
+              {/* Paused Status Banner */}
+              {client.status === 'pausado' && (
+                <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-900 dark:text-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <PauseCircle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                      <span className="font-bold text-xs uppercase tracking-wide">Cliente Pausado / Desativado Temporariamente</span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-1">
+                      Pausado em: <strong>{client.pausedAt || 'Data não informada'}</strong> • Motivo: <em>{client.pauseReason || 'Sem motivo registrado'}</em>
+                    </p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      Cobranças futuras recorrentes estão suspensas. Todos os dados históricos e contratos permanecem intactos.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onRequestReactivate?.(client)}
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 shrink-0 self-start sm:self-auto transition-transform hover:scale-105"
+                  >
+                    <PlayCircle className="w-4 h-4" />
+                    <span>Reativar Cliente</span>
+                  </button>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-bold text-slate-500">Razão Social</label>
@@ -991,6 +1280,7 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                     className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold"
                   >
                     <option value="ativo">Ativo</option>
+                    <option value="pausado">Pausado / Temporariamente Desativado</option>
                     <option value="inativo">Inativo</option>
                     <option value="suspenso">Suspenso</option>
                     <option value="cancelado">Cancelado</option>
@@ -1008,15 +1298,38 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                 />
               </div>
 
-              <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => onRequestDelete?.(client)}
-                  className="px-4 py-2.5 bg-red-500/10 hover:bg-red-600 hover:text-white text-red-600 border border-red-500/20 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Excluir / Inativar Cliente</span>
-                </button>
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+                <div className="flex items-center gap-2">
+                  {client.status === 'ativo' ? (
+                    <button
+                      type="button"
+                      onClick={() => onRequestPause?.(client)}
+                      className="px-3.5 py-2.5 bg-amber-500/10 hover:bg-amber-600 hover:text-white text-amber-600 border border-amber-500/20 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors"
+                    >
+                      <PauseCircle className="w-3.5 h-3.5" />
+                      <span>Desativar Cliente (Pausar)</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onRequestReactivate?.(client)}
+                      className="px-3.5 py-2.5 bg-emerald-500/10 hover:bg-emerald-600 hover:text-white text-emerald-600 border border-emerald-500/20 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors"
+                    >
+                      <PlayCircle className="w-3.5 h-3.5" />
+                      <span>Reativar Cliente</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => onRequestDelete?.(client)}
+                    className="px-3.5 py-2.5 bg-red-500/10 hover:bg-red-600 hover:text-white text-red-600 border border-red-500/20 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Excluir / Inativar</span>
+                  </button>
+                </div>
+
                 <button
                   type="button"
                   onClick={handleSaveGeneralData}

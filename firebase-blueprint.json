@@ -254,6 +254,65 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["name", "whatsapp", "adminEmail"]
+    },
+    "ProductService": {
+      "title": "ProductService",
+      "description": "Products and standalone services sold by Agência Raon",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "maxLength": 50 },
+        "name": { "type": "string", "maxLength": 150 },
+        "type": { "type": "string", "enum": ["produto", "servico"] },
+        "category": { "type": "string", "maxLength": 100 },
+        "defaultPrice": { "type": "number" },
+        "costPrice": { "type": "number" },
+        "stockQuantity": { "type": "number" },
+        "description": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["ativo", "inativo"] },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["name", "type", "category", "defaultPrice", "status"]
+    },
+    "ProductCategory": {
+      "title": "ProductCategory",
+      "description": "Customizable categories for products and services",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 100 },
+        "type": { "type": "string", "enum": ["produto", "servico", "ambos"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "Sale": {
+      "title": "Sale",
+      "description": "Manual sales record for standalone products and services",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "maxLength": 50 },
+        "itemId": { "type": "string", "maxLength": 100 },
+        "itemName": { "type": "string", "maxLength": 150 },
+        "itemType": { "type": "string", "enum": ["produto", "servico"] },
+        "category": { "type": "string", "maxLength": 100 },
+        "saleDate": { "type": "string", "maxLength": 15 },
+        "quantity": { "type": "number" },
+        "unitPrice": { "type": "number" },
+        "discount": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "buyerName": { "type": "string", "maxLength": 150 },
+        "buyerContact": { "type": "string", "maxLength": 100 },
+        "paymentMethod": { "type": "string", "maxLength": 50 },
+        "financialStatus": { "type": "string", "enum": ["pendente", "parcial", "pago", "cancelado"] },
+        "paymentDate": { "type": "string", "maxLength": 15 },
+        "paidAmount": { "type": "number" },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "receivableId": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["itemId", "itemName", "itemType", "saleDate", "quantity", "unitPrice", "totalAmount", "financialStatus"]
     }
   },
   "firestore": {
@@ -312,6 +371,18 @@
     "/agency_settings/{settingId}": {
       "schema": "AgencySetting",
       "description": "Agência Raon system settings"
+    },
+    "/products_services/{itemId}": {
+      "schema": "ProductService",
+      "description": "Standalone products and services"
+    },
+    "/product_categories/{catId}": {
+      "schema": "ProductCategory",
+      "description": "Product and standalone service categories"
+    },
+    "/sales/{saleId}": {
+      "schema": "Sale",
+      "description": "Manual sales records"
     }
   }
 }

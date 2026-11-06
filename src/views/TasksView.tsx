@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   CheckSquare,
   Plus,
@@ -15,6 +15,9 @@ import {
   AlertCircle,
   Tag,
   Building2,
+  CheckCircle2,
+  ArrowUpDown,
+  Sparkles,
 } from 'lucide-react';
 import { Task, TaskStatus, TaskPriority, Client } from '../types';
 import { createTask, updateTask, addTaskComment, deleteTask } from '../services/db';
@@ -28,12 +31,15 @@ interface TasksViewProps {
 
 export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh }) => {
   const { user } = useAuth();
-  const [viewMode, setViewMode] = useState<'kanban' | 'lista' | 'calendario'>('kanban');
+  const [viewMode, setViewMode] = useState<'kanban' | 'lista'>('kanban');
   const [searchTerm, setSearchTerm] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<string>('todas');
+  const [sortBy, setSortBy] = useState<'dueDate' | 'requestedDate' | 'priority'>('dueDate');
   const [isNewTaskOpen, setIsNewTaskOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [newCommentText, setNewCommentText] = useState('');
+
+  const todayStr = new Date().toISOString().split('T')[0];
 
   // Form State
   const [formData, setFormData] = useState({
@@ -43,7 +49,8 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
     description: '',
     assignedTo: 'Equipe Raon',
     priority: 'media' as TaskPriority,
-    dueDate: new Date().toISOString().split('T')[0],
+    requestedDate: todayStr,
+    dueDate: todayStr,
     status: 'a_fazer' as TaskStatus,
   });
 
@@ -56,15 +63,39 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
     { id: 'cancelada', label: 'Cancelada', color: 'border-red-500 bg-red-500/10' },
   ];
 
-  const filteredTasks = tasks.filter((t) => {
-    const matchSearch =
-      t.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (t.clientName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (t.serviceName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (t.assignedTo || '').toLowerCase().includes(searchTerm.toLowerCase());
-    const matchPriority = priorityFilter === 'todas' || t.priority === priorityFilter;
-    return matchSearch && matchPriority;
-  });
+  const priorityWeights: Record<TaskPriority, number> = {
+    urgente: 4,
+    alta: 3,
+    media: 2,
+    baixa: 1,
+  };
+
+  const filteredTasks = useMemo(() => {
+    return tasks
+      .filter((t) => {
+        const matchSearch =
+          t.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (t.clientName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (t.serviceName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (t.assignedTo || '').toLowerCase().includes(searchTerm.toLowerCase());
+        const matchPriority = priorityFilter === 'todas' || t.priority === priorityFilter;
+        return matchSearch && matchPriority;
+      })
+      .sort((a, b) => {
+        if (sortBy === 'dueDate') {
+          return a.dueDate.localeCompare(b.dueDate);
+        }
+        if (sortBy === 'requestedDate') {
+          const reqA = a.requestedDate || a.createdAt || '';
+          const reqB = b.requestedDate || b.createdAt || '';
+          return reqB.localeCompare(reqA); // Most recent requests first
+        }
+        if (sortBy === 'priority') {
+          return (priorityWeights[b.priority] || 0) - (priorityWeights[a.priority] || 0);
+        }
+        return 0;
+      });
+  }, [tasks, searchTerm, priorityFilter, sortBy]);
 
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,8 +112,10 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
           description: formData.description,
           assignedTo: formData.assignedTo,
           priority: formData.priority,
+          requestedDate: formData.requestedDate || todayStr,
           dueDate: formData.dueDate,
           status: formData.status,
+          completedAt: formData.status === 'concluida' ? todayStr : undefined,
           comments: [],
         },
         user?.email || 'somosraon@gmail.com'
@@ -95,7 +128,8 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
         description: '',
         assignedTo: 'Equipe Raon',
         priority: 'media',
-        dueDate: new Date().toISOString().split('T')[0],
+        requestedDate: todayStr,
+        dueDate: todayStr,
         status: 'a_fazer',
       });
       onRefresh();
@@ -107,7 +141,13 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
 
   const handleUpdateStatus = async (task: Task, newStatus: TaskStatus) => {
     try {
-      await updateTask(task.id, { status: newStatus }, user?.email || 'somosraon@gmail.com');
+      const updateData: Partial<Task> = { status: newStatus };
+      if (newStatus === 'concluida') {
+        updateData.completedAt = todayStr;
+      } else if (task.status === 'concluida') {
+        updateData.completedAt = undefined;
+      }
+      await updateTask(task.id, updateData, user?.email || 'somosraon@gmail.com');
       onRefresh();
     } catch (err) {
       console.error(err);
@@ -160,15 +200,16 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">
+          <h1 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight flex items-center gap-2">
+            <CheckSquare className="w-6 h-6 text-[#0878D9]" />
             Tarefas & Entregas Operacionais
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Gestão de produção por cliente com visualização em Kanban, Lista e Calendário.
+            Gestão de pedidos com rastreamento da data de solicitação, prazo de entrega e conclusão.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {/* View mode toggle */}
           <div className="flex items-center gap-1 p-1 bg-slate-200/60 dark:bg-slate-800/80 rounded-xl">
             <button
@@ -200,14 +241,14 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
             className="flex items-center gap-1.5 px-4 py-2.5 bg-[#0878D9] hover:bg-[#0768BD] text-white font-bold text-xs rounded-xl shadow-md transition-all hover:scale-105"
           >
             <Plus className="w-4 h-4" />
-            <span>Nova Tarefa</span>
+            <span>+ Nova Tarefa</span>
           </button>
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="p-3.5 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="relative w-full sm:w-80">
+      {/* Filters and Sorting bar */}
+      <div className="p-3.5 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
+        <div className="relative w-full md:w-80">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
             type="text"
@@ -218,21 +259,39 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
           />
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-slate-400">Prioridade:</span>
-          {(['todas', 'urgente', 'alta', 'media', 'baixa'] as const).map((pr) => (
-            <button
-              key={pr}
-              onClick={() => setPriorityFilter(pr)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold capitalize ${
-                priorityFilter === pr
-                  ? 'bg-[#102B59] text-white'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
-              }`}
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-between md:justify-end">
+          {/* Priority filter */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-bold text-slate-400">Prioridade:</span>
+            {(['todas', 'urgente', 'alta', 'media', 'baixa'] as const).map((pr) => (
+              <button
+                key={pr}
+                onClick={() => setPriorityFilter(pr)}
+                className={`px-2 py-1 rounded-lg text-xs font-bold capitalize ${
+                  priorityFilter === pr
+                    ? 'bg-[#102B59] text-white'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                }`}
+              >
+                {pr}
+              </button>
+            ))}
+          </div>
+
+          {/* Sort selector */}
+          <div className="flex items-center gap-1.5">
+            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+            <span className="text-xs font-bold text-slate-400">Ordenar:</span>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="px-2.5 py-1 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold"
             >
-              {pr}
-            </button>
-          ))}
+              <option value="dueDate">Prazo de Entrega</option>
+              <option value="requestedDate">Data do Pedido (Recentes)</option>
+              <option value="priority">Prioridade</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -267,62 +326,78 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
                       Nenhuma tarefa
                     </div>
                   ) : (
-                    colTasks.map((task) => (
-                      <div
-                        key={task.id}
-                        onClick={() => setSelectedTask(task)}
-                        className="p-3 bg-white dark:bg-[#10192A] rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs hover:border-[#0878D9] hover:shadow-md transition-all cursor-pointer group space-y-2"
-                      >
-                        {/* Client & Priority */}
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="text-[10px] font-bold text-[#0878D9] truncate max-w-[120px]">
-                            {task.clientName || 'Geral'}
-                          </span>
-                          <span
-                            className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md ${
-                              priorityBadge[task.priority]?.bg
-                            } ${priorityBadge[task.priority]?.text}`}
-                          >
-                            {task.priority}
-                          </span>
-                        </div>
+                    colTasks.map((task) => {
+                      const isOverdue = task.dueDate < todayStr && task.status !== 'concluida' && task.status !== 'cancelada';
 
-                        {/* Title */}
-                        <h4 className="font-bold text-xs text-slate-800 dark:text-slate-200 leading-snug line-clamp-2">
-                          {task.title}
-                        </h4>
-
-                        {/* Footer info */}
-                        <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400">
-                          <span className="flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {task.dueDate}
-                          </span>
-                          {task.comments && task.comments.length > 0 && (
-                            <span className="flex items-center gap-0.5">
-                              <MessageSquare className="w-3 h-3 text-[#FF7817]" />
-                              {task.comments.length}
+                      return (
+                        <div
+                          key={task.id}
+                          onClick={() => setSelectedTask(task)}
+                          className={`p-3 bg-white dark:bg-[#10192A] rounded-xl border shadow-xs hover:border-[#0878D9] hover:shadow-md transition-all cursor-pointer group space-y-2 ${
+                            isOverdue ? 'border-red-300 dark:border-red-900/50' : 'border-slate-200 dark:border-slate-800'
+                          }`}
+                        >
+                          {/* Client & Priority */}
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="text-[10px] font-bold text-[#0878D9] truncate max-w-[120px]">
+                              {task.clientName || 'Geral'}
                             </span>
-                          )}
-                        </div>
+                            <span
+                              className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md ${
+                                priorityBadge[task.priority]?.bg
+                              } ${priorityBadge[task.priority]?.text}`}
+                            >
+                              {task.priority}
+                            </span>
+                          </div>
 
-                        {/* Fast Move select */}
-                        <div onClick={(e) => e.stopPropagation()} className="pt-1">
-                          <select
-                            value={task.status}
-                            onChange={(e) => handleUpdateStatus(task, e.target.value as TaskStatus)}
-                            className="w-full text-[10px] font-bold p-1 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300"
-                          >
-                            <option value="a_fazer">Mover: A Fazer</option>
-                            <option value="em_andamento">Mover: Em Andamento</option>
-                            <option value="aguardando_cliente">Mover: Aguardando Cliente</option>
-                            <option value="em_revisao">Mover: Em Revisão</option>
-                            <option value="concluida">Mover: Concluída</option>
-                            <option value="cancelada">Mover: Cancelada</option>
-                          </select>
+                          {/* Title */}
+                          <h4 className="font-bold text-xs text-slate-800 dark:text-slate-200 leading-snug line-clamp-2">
+                            {task.title}
+                          </h4>
+
+                          {/* Dates Breakdown */}
+                          <div className="space-y-1 text-[10px] text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-100 dark:border-slate-800/80">
+                            {task.requestedDate && (
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-400">Pedido:</span>
+                                <span className="font-semibold text-slate-700 dark:text-slate-300">{task.requestedDate}</span>
+                              </div>
+                            )}
+                            <div className="flex items-center justify-between">
+                              <span className={isOverdue ? 'text-red-600 font-bold' : 'text-slate-400'}>
+                                {isOverdue ? 'Atrasado:' : 'Prazo:'}
+                              </span>
+                              <span className={`font-semibold ${isOverdue ? 'text-red-600 font-bold' : 'text-slate-700 dark:text-slate-300'}`}>
+                                {task.dueDate}
+                              </span>
+                            </div>
+                            {task.completedAt && (
+                              <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400">
+                                <span className="font-bold">Concluída:</span>
+                                <span className="font-bold">{task.completedAt}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Fast Move select */}
+                          <div onClick={(e) => e.stopPropagation()} className="pt-1">
+                            <select
+                              value={task.status}
+                              onChange={(e) => handleUpdateStatus(task, e.target.value as TaskStatus)}
+                              className="w-full text-[10px] font-bold p-1 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300"
+                            >
+                              <option value="a_fazer">Mover: A Fazer</option>
+                              <option value="em_andamento">Mover: Em Andamento</option>
+                              <option value="aguardando_cliente">Mover: Aguardando Cliente</option>
+                              <option value="em_revisao">Mover: Em Revisão</option>
+                              <option value="concluida">Mover: Concluída</option>
+                              <option value="cancelada">Mover: Cancelada</option>
+                            </select>
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -331,64 +406,89 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
         </div>
       )}
 
-      {/* ==================== VIEW 2: LISTA ==================== */}
+      {/* ==================== VIEW 2: LISTA DETALHADA ==================== */}
       {viewMode === 'lista' && (
         <div className="overflow-hidden rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-xs">
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-[11px] font-black uppercase text-slate-500">
-                <th className="py-3 px-4">Tarefa</th>
-                <th className="py-3 px-4">Cliente</th>
-                <th className="py-3 px-4">Serviço</th>
-                <th className="py-3 px-4">Responsável</th>
+                <th className="py-3 px-4">Tarefa / Cliente</th>
+                <th className="py-3 px-4">Data Pedido</th>
+                <th className="py-3 px-4">Prazo de Entrega</th>
+                <th className="py-3 px-4">Conclusão</th>
                 <th className="py-3 px-4">Prioridade</th>
-                <th className="py-3 px-4">Prazo</th>
                 <th className="py-3 px-4">Status</th>
+                <th className="py-3 px-4 text-right">Ação</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {filteredTasks.map((t) => (
-                <tr
-                  key={t.id}
-                  onClick={() => setSelectedTask(t)}
-                  className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 cursor-pointer"
-                >
-                  <td className="py-3 px-4 font-bold text-slate-800 dark:text-slate-200">
-                    {t.title}
-                  </td>
-                  <td className="py-3 px-4 text-[#0878D9] font-semibold">{t.clientName}</td>
-                  <td className="py-3 px-4 text-slate-500">{t.serviceName}</td>
-                  <td className="py-3 px-4">{t.assignedTo || 'Equipe Raon'}</td>
-                  <td className="py-3 px-4">
-                    <span
-                      className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md ${
-                        priorityBadge[t.priority]?.bg
-                      } ${priorityBadge[t.priority]?.text}`}
-                    >
-                      {t.priority}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 font-mono">{t.dueDate}</td>
-                  <td className="py-3 px-4 font-black uppercase text-[10px]">
-                    {t.status.replace('_', ' ')}
+              {filteredTasks.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-12 text-center text-slate-400">
+                    Nenhuma tarefa encontrada.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                filteredTasks.map((t) => {
+                  const isOverdue = t.dueDate < todayStr && t.status !== 'concluida' && t.status !== 'cancelada';
+
+                  return (
+                    <tr
+                      key={t.id}
+                      onClick={() => setSelectedTask(t)}
+                      className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 cursor-pointer"
+                    >
+                      <td className="py-3 px-4">
+                        <div className="font-bold text-slate-800 dark:text-slate-200">{t.title}</div>
+                        <div className="text-[11px] text-slate-400">{t.clientName} • {t.serviceName}</div>
+                      </td>
+                      <td className="py-3 px-4 font-mono">{t.requestedDate || '—'}</td>
+                      <td className={`py-3 px-4 font-mono font-bold ${isOverdue ? 'text-red-600' : ''}`}>
+                        {t.dueDate}
+                        {isOverdue && <span className="ml-1 text-[10px] text-red-500 uppercase font-black">(Atrasada)</span>}
+                      </td>
+                      <td className="py-3 px-4 font-mono text-emerald-600 font-bold">{t.completedAt || '—'}</td>
+                      <td className="py-3 px-4">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${priorityBadge[t.priority]?.bg} ${priorityBadge[t.priority]?.text}`}>
+                          {t.priority}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                          {t.status.replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => handleUpdateStatus(t, t.status === 'concluida' ? 'em_andamento' : 'concluida')}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
+                            t.status === 'concluida'
+                              ? 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+                              : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          }`}
+                        >
+                          {t.status === 'concluida' ? 'Reabrir' : 'Concluir'}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
       )}
 
-      {/* ==================== MODAL: DETALHES DA TAREFA & COMENTÁRIOS ==================== */}
+      {/* ==================== MODAL: DETALHE DA TAREFA ==================== */}
       {selectedTask && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
-          <div className="relative w-full max-w-xl bg-white dark:bg-[#10192A] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[85vh]">
+          <div className="relative w-full max-w-lg bg-white dark:bg-[#10192A] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[85vh]">
             <div className="px-6 py-4 bg-[#102B59] text-white flex items-center justify-between">
               <div>
-                <span className="text-[10px] font-black uppercase tracking-wider text-[#FF7817]">
-                  {selectedTask.serviceName || 'Serviço Agência Raon'}
+                <span className="text-[10px] font-black uppercase text-blue-300 tracking-wider">
+                  {selectedTask.serviceName || 'Geral'}
                 </span>
-                <h3 className="font-bold text-base leading-tight mt-0.5">{selectedTask.title}</h3>
+                <h3 className="font-bold text-base text-white">{selectedTask.title}</h3>
               </div>
               <button
                 onClick={() => setSelectedTask(null)}
@@ -405,9 +505,19 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
                   <strong className="text-slate-800 dark:text-white">{selectedTask.clientName}</strong>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Prazo:</span>
+                  <span className="text-slate-400">Data do Pedido / Solicitação:</span>
+                  <strong className="text-slate-800 dark:text-white">{selectedTask.requestedDate || '—'}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Prazo de Entrega:</span>
                   <strong className="text-slate-800 dark:text-white">{selectedTask.dueDate}</strong>
                 </div>
+                {selectedTask.completedAt && (
+                  <div className="flex justify-between text-emerald-600">
+                    <span className="font-bold">Data de Conclusão:</span>
+                    <strong className="font-black">{selectedTask.completedAt}</strong>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-slate-400">Responsável:</span>
                   <strong className="text-slate-800 dark:text-white">{selectedTask.assignedTo}</strong>
@@ -478,7 +588,7 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
           <div className="relative w-full max-w-lg bg-white dark:bg-[#10192A] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
             <div className="px-6 py-4 bg-[#102B59] text-white flex items-center justify-between">
-              <h3 className="font-bold text-sm">Criar Nova Tarefa / Entrega</h3>
+              <h3 className="font-bold text-sm">Criar Nova Tarefa / Solicitação</h3>
               <button
                 onClick={() => setIsNewTaskOpen(false)}
                 className="p-1 text-slate-400 hover:text-white"
@@ -529,7 +639,35 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-slate-600 dark:text-slate-400">
+                    Data do Pedido / Solicitação *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={formData.requestedDate}
+                    onChange={(e) => setFormData({ ...formData, requestedDate: e.target.value })}
+                    className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-600 dark:text-slate-400">
+                    Data do Prazo / Entrega *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={formData.dueDate}
+                    onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
+                    className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="font-bold text-slate-600 dark:text-slate-400">Prioridade</label>
                   <select
@@ -545,17 +683,6 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
                 </div>
 
                 <div>
-                  <label className="font-bold text-slate-600 dark:text-slate-400">Prazo de Entrega</label>
-                  <input
-                    type="date"
-                    required
-                    value={formData.dueDate}
-                    onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
-                    className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl"
-                  />
-                </div>
-
-                <div>
                   <label className="font-bold text-slate-600 dark:text-slate-400">Status Inicial</label>
                   <select
                     value={formData.status}
@@ -564,6 +691,7 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
                   >
                     <option value="a_fazer">A Fazer</option>
                     <option value="em_andamento">Em Andamento</option>
+                    <option value="concluida">Concluída</option>
                   </select>
                 </div>
               </div>

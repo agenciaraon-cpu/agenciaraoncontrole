@@ -28,6 +28,10 @@ import {
   ContactLog,
   AuditLog,
   AgencySettings,
+  ProductService,
+  ProductCategory,
+  Sale,
+  RevenueSource,
 } from '../types';
 
 // ==================== AUDIT LOGGING ====================
@@ -156,6 +160,66 @@ export async function deleteClient(id: string, clientName: string, userEmail: st
   } catch (err) {
     console.error('Erro ao excluir cliente:', err);
     handleFirestoreError(err, OperationType.DELETE, `clients/${id}`);
+  }
+}
+
+export async function pauseClient(
+  id: string,
+  clientName: string,
+  pauseReason: string,
+  suspendBilling: boolean,
+  userEmail: string
+): Promise<void> {
+  try {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const docRef = doc(db, 'clients', id);
+    await updateDoc(docRef, {
+      status: 'pausado',
+      pausedAt: todayStr,
+      pauseReason: pauseReason || 'Pausa temporária solicitada pelo cliente',
+      suspendFutureBilling: suspendBilling,
+      updatedAt: new Date().toISOString(),
+    });
+    await logAudit(
+      userEmail,
+      'user',
+      'client',
+      id,
+      'pause',
+      `Cliente ${clientName} pausado em ${todayStr}. Motivo: ${pauseReason}. Suspensão de mensalidades: ${suspendBilling ? 'Sim' : 'Não'}`
+    );
+  } catch (err) {
+    console.error('Erro ao pausar cliente:', err);
+    handleFirestoreError(err, OperationType.UPDATE, `clients/${id}`);
+  }
+}
+
+export async function reactivateClient(
+  id: string,
+  clientName: string,
+  resumedBillingDate: string,
+  userEmail: string
+): Promise<void> {
+  try {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const docRef = doc(db, 'clients', id);
+    await updateDoc(docRef, {
+      status: 'ativo',
+      reactivatedAt: todayStr,
+      suspendFutureBilling: false,
+      updatedAt: new Date().toISOString(),
+    });
+    await logAudit(
+      userEmail,
+      'user',
+      'client',
+      id,
+      'reactivate',
+      `Cliente ${clientName} reativado em ${todayStr}. Próxima competência faturada a partir de: ${resumedBillingDate || todayStr}`
+    );
+  } catch (err) {
+    console.error('Erro ao reativar cliente:', err);
+    handleFirestoreError(err, OperationType.UPDATE, `clients/${id}`);
   }
 }
 
@@ -705,6 +769,287 @@ export async function getAuditLogs(): Promise<AuditLog[]> {
     return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   } catch (err) {
     handleFirestoreError(err, OperationType.GET, 'audit_logs');
+    return [];
+  }
+}
+
+// ==================== PRODUTOS E SERVIÇOS AVULSOS ====================
+export async function getProductsServices(): Promise<ProductService[]> {
+  try {
+    const snap = await getDocs(collection(db, 'products_services'));
+    const list: ProductService[] = [];
+    snap.forEach((d) => {
+      list.push({ ...d.data(), id: d.id } as ProductService);
+    });
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, 'products_services');
+  }
+}
+
+export async function createProductService(item: Omit<ProductService, 'id'>, userEmail: string): Promise<string> {
+  try {
+    const docRef = await addDoc(collection(db, 'products_services'), {
+      ...item,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    await logAudit(
+      userEmail,
+      'user',
+      'product_service',
+      docRef.id,
+      'create',
+      `Cadastro de ${item.type}: ${item.name} (${item.code || ''}) - R$ ${item.defaultPrice}`
+    );
+    return docRef.id;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, 'products_services');
+  }
+}
+
+export async function updateProductService(id: string, updates: Partial<ProductService>, userEmail: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'products_services', id), {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
+    await logAudit(userEmail, 'user', 'product_service', id, 'update', `Atualização do item ID ${id}`);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `products_services/${id}`);
+  }
+}
+
+export async function deleteProductService(id: string, itemName: string, userEmail: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'products_services', id));
+    await logAudit(userEmail, 'user', 'product_service', id, 'delete', `Exclusão do item ${itemName}`);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `products_services/${id}`);
+  }
+}
+
+// ==================== CATEGORIAS DE PRODUTOS E SERVIÇOS ====================
+export async function getProductCategories(): Promise<ProductCategory[]> {
+  try {
+    const snap = await getDocs(collection(db, 'product_categories'));
+    const list: ProductCategory[] = [];
+    snap.forEach((d) => {
+      list.push({ ...d.data(), id: d.id } as ProductCategory);
+    });
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, 'product_categories');
+  }
+}
+
+export async function createProductCategory(cat: Omit<ProductCategory, 'id'>, userEmail: string): Promise<string> {
+  try {
+    const docRef = await addDoc(collection(db, 'product_categories'), {
+      ...cat,
+      createdAt: new Date().toISOString(),
+    });
+    await logAudit(userEmail, 'user', 'product_category', docRef.id, 'create', `Criação da categoria: ${cat.name}`);
+    return docRef.id;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, 'product_categories');
+  }
+}
+
+export async function deleteProductCategory(id: string, catName: string, userEmail: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'product_categories', id));
+    await logAudit(userEmail, 'user', 'product_category', id, 'delete', `Exclusão da categoria ${catName}`);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `product_categories/${id}`);
+  }
+}
+
+// ==================== REGISTRO MANUAL DE VENDAS & INTEGRAÇÃO FINANCEIRA ====================
+export async function getSales(): Promise<Sale[]> {
+  try {
+    const snap = await getDocs(collection(db, 'sales'));
+    const list: Sale[] = [];
+    snap.forEach((d) => {
+      list.push({ ...d.data(), id: d.id } as Sale);
+    });
+    return list.sort((a, b) => (b.saleDate || '').localeCompare(a.saleDate || ''));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, 'sales');
+  }
+}
+
+export async function createSale(saleData: Omit<Sale, 'id'>, userEmail: string): Promise<string> {
+  try {
+    // 1. Create Sale document
+    const saleCol = collection(db, 'sales');
+    const saleDocRef = await addDoc(saleCol, {
+      ...saleData,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const saleId = saleDocRef.id;
+    const isPaid = saleData.financialStatus === 'pago';
+    const isPartial = saleData.financialStatus === 'parcial';
+    const finalPaid = isPaid ? saleData.totalAmount : isPartial ? (saleData.paidAmount || 0) : 0;
+    const finalStatus = isPaid ? 'recebido' : isPartial ? 'parcial' : saleData.financialStatus === 'cancelado' ? 'cancelado' : 'pendente';
+    const paymentDate = (isPaid || isPartial) ? (saleData.paymentDate || saleData.saleDate) : undefined;
+
+    // Derive competence MM/YYYY from saleDate (YYYY-MM-DD)
+    const [y, m] = saleData.saleDate.split('-');
+    const competence = m && y ? `${m}/${y}` : `${String(new Date().getMonth() + 1).padStart(2, '0')}/${new Date().getFullYear()}`;
+
+    // 2. Automatically create matching Receivable with revenueSource: 'produto' or 'servico_avulso'
+    // This integrates directly into the financial module with zero duplication!
+    const recRef = await addDoc(collection(db, 'receivables'), {
+      clientId: '',
+      clientName: saleData.buyerName ? `${saleData.buyerName} (${saleData.itemType === 'produto' ? 'Venda Produto' : 'Serviço Avulso'})` : `Venda Avulsa (${saleData.itemType === 'produto' ? 'Produto' : 'Serviço'})`,
+      revenueSource: saleData.itemType === 'produto' ? 'produto' : 'servico_avulso',
+      saleId: saleId,
+      itemType: saleData.itemType,
+      category: saleData.category,
+      description: `Venda ${saleData.code || 'AVULSA'}: ${saleData.itemName} (${saleData.quantity}x)`,
+      dueDate: saleData.saleDate,
+      competence,
+      originalAmount: saleData.totalAmount,
+      discountAmount: saleData.discount || 0,
+      paidAmount: finalPaid,
+      status: finalStatus,
+      paymentMethod: saleData.paymentMethod || 'PIX',
+      paymentDate,
+      notes: saleData.notes || '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    // 3. Update sale with receivableId link
+    await updateDoc(saleDocRef, { receivableId: recRef.id });
+
+    // 4. Update stock if physical product
+    if (saleData.itemType === 'produto' && saleData.itemId) {
+      try {
+        const itemDocRef = doc(db, 'products_services', saleData.itemId);
+        const itemSnap = await getDoc(itemDocRef);
+        if (itemSnap.exists()) {
+          const itemData = itemSnap.data() as ProductService;
+          if (typeof itemData.stockQuantity === 'number') {
+            const newStock = Math.max(0, itemData.stockQuantity - saleData.quantity);
+            await updateDoc(itemDocRef, { stockQuantity: newStock, updatedAt: new Date().toISOString() });
+          }
+        }
+      } catch (stockErr) {
+        console.warn('Aviso ao atualizar estoque:', stockErr);
+      }
+    }
+
+    await logAudit(
+      userEmail,
+      'user',
+      'sale',
+      saleId,
+      'create',
+      `Venda registrada: ${saleData.itemName} (${saleData.quantity}x) - Total: R$ ${saleData.totalAmount}. Status: ${saleData.financialStatus}`
+    );
+
+    return saleId;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, 'sales');
+  }
+}
+
+export async function confirmSalePayment(
+  saleId: string,
+  paidAmount: number,
+  paymentDate: string,
+  userEmail: string
+): Promise<void> {
+  try {
+    const saleDocRef = doc(db, 'sales', saleId);
+    const saleSnap = await getDoc(saleDocRef);
+    if (!saleSnap.exists()) throw new Error('Venda não encontrada');
+    const sale = saleSnap.data() as Sale;
+
+    const actualPaymentDate = paymentDate || new Date().toISOString().split('T')[0];
+    const isFull = paidAmount >= sale.totalAmount;
+    const newFinancialStatus = isFull ? 'pago' : 'parcial';
+
+    // Update sale
+    await updateDoc(saleDocRef, {
+      financialStatus: newFinancialStatus,
+      paidAmount,
+      paymentDate: actualPaymentDate,
+      updatedAt: new Date().toISOString(),
+    });
+
+    // Sync matching receivable
+    if (sale.receivableId) {
+      const recDocRef = doc(db, 'receivables', sale.receivableId);
+      await updateDoc(recDocRef, {
+        status: isFull ? 'recebido' : 'parcial',
+        paidAmount,
+        paymentDate: actualPaymentDate,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    await logAudit(
+      userEmail,
+      'user',
+      'sale',
+      saleId,
+      'confirm_payment',
+      `Pagamento confirmado para a venda ${sale.code} (${sale.itemName}): R$ ${paidAmount} recebido em ${actualPaymentDate}`
+    );
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `sales/${saleId}`);
+  }
+}
+
+export async function cancelSale(saleId: string, userEmail: string): Promise<void> {
+  try {
+    const saleDocRef = doc(db, 'sales', saleId);
+    const saleSnap = await getDoc(saleDocRef);
+    if (!saleSnap.exists()) throw new Error('Venda não encontrada');
+    const sale = saleSnap.data() as Sale;
+
+    // Update sale to cancelado
+    await updateDoc(saleDocRef, {
+      financialStatus: 'cancelado',
+      updatedAt: new Date().toISOString(),
+    });
+
+    // Sync matching receivable
+    if (sale.receivableId) {
+      const recDocRef = doc(db, 'receivables', sale.receivableId);
+      await updateDoc(recDocRef, {
+        status: 'cancelado',
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    // Revert stock if physical product
+    if (sale.itemType === 'produto' && sale.itemId) {
+      try {
+        const itemDocRef = doc(db, 'products_services', sale.itemId);
+        const itemSnap = await getDoc(itemDocRef);
+        if (itemSnap.exists()) {
+          const itemData = itemSnap.data() as ProductService;
+          if (typeof itemData.stockQuantity === 'number') {
+            await updateDoc(itemDocRef, {
+              stockQuantity: itemData.stockQuantity + (sale.quantity || 1),
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        }
+      } catch (stockErr) {
+        console.warn('Aviso ao reverter estoque:', stockErr);
+      }
+    }
+
+    await logAudit(userEmail, 'user', 'sale', saleId, 'cancel', `Venda ${sale.code} cancelada`);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `sales/${saleId}`);
   }
 }
 
@@ -1136,8 +1481,108 @@ export async function seedInitialDataIfEmpty() {
       createdAt: new Date().toISOString(),
     });
 
+    // Call products and services seeder if needed
+    await seedProductsAndServicesIfEmpty();
+
     console.log('Dados iniciais populados com sucesso no Firestore.');
   } catch (err) {
     console.error('Erro ao popular dados iniciais:', err);
+  }
+}
+
+export async function seedProductsAndServicesIfEmpty() {
+  try {
+    const snap = await getDocs(collection(db, 'products_services'));
+    if (!snap.empty) return;
+
+    // 1. Seed Categories
+    const catCol = collection(db, 'product_categories');
+    const defaultCats = [
+      { name: 'Sistemas & Aplicativos', type: 'ambos' as const },
+      { name: 'Sites & Landing Pages', type: 'servico' as const },
+      { name: 'Consultorias & Estratégia', type: 'servico' as const },
+      { name: 'Serviços Digitais Avulsos', type: 'servico' as const },
+      { name: 'Equipamentos & Hardware', type: 'produto' as const },
+      { name: 'Materiais & Merchandising', type: 'produto' as const },
+    ];
+    for (const c of defaultCats) {
+      await addDoc(catCol, { ...c, createdAt: new Date().toISOString() });
+    }
+
+    // 2. Seed Initial Products and Standalone Services
+    const prodCol = collection(db, 'products_services');
+    await addDoc(prodCol, {
+      code: 'PRD-001',
+      name: 'Totem Digital Interativo 43"',
+      type: 'produto',
+      category: 'Equipamentos & Hardware',
+      defaultPrice: 4800,
+      costPrice: 3200,
+      stockQuantity: 4,
+      description: 'Totem touch screen vertical para recepção e eventos corporativos.',
+      status: 'ativo',
+      notes: 'Garantia de 12 meses direto com fornecedor.',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    await addDoc(prodCol, {
+      code: 'PRD-002',
+      name: 'Kit de Boas-Vindas Corporativo (50 un)',
+      type: 'produto',
+      category: 'Materiais & Merchandising',
+      defaultPrice: 1250,
+      costPrice: 750,
+      stockQuantity: 15,
+      description: 'Cadernos personalizados, canetas metálicas e squeeze térmico.',
+      status: 'ativo',
+      notes: 'Prazo de entrega física de 5 dias úteis.',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    await addDoc(prodCol, {
+      code: 'SRV-001',
+      name: 'Desenvolvimento de Landing Page de Alta Conversão',
+      type: 'servico',
+      category: 'Sites & Landing Pages',
+      defaultPrice: 1800,
+      costPrice: 400,
+      description: 'Página de captura responsiva, integrada com WhatsApp e pixel Meta/Google.',
+      status: 'ativo',
+      notes: 'Entrega em até 7 dias úteis.',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    await addDoc(prodCol, {
+      code: 'SRV-002',
+      name: 'Consultoria de Posicionamento e Tráfego (4h)',
+      type: 'servico',
+      category: 'Consultorias & Estratégia',
+      defaultPrice: 1200,
+      costPrice: 0,
+      description: 'Diagnóstico de funil de vendas, auditoria de anúncios e plano de ação.',
+      status: 'ativo',
+      notes: 'Sessão online com gravação disponibilizada.',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    await addDoc(prodCol, {
+      code: 'SRV-003',
+      name: 'Desenvolvimento de Sistema Web Sob Demanda',
+      type: 'servico',
+      category: 'Sistemas & Aplicativos',
+      defaultPrice: 5500,
+      costPrice: 1200,
+      description: 'Sistema administrativo com painel, autenticação e banco de dados em nuvem.',
+      status: 'ativo',
+      notes: 'Escopo sob medida para médias e grandes empresas.',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn('Aviso ao popular produtos/serviços:', err);
   }
 }

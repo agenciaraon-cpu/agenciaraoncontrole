@@ -11,7 +11,7 @@ export interface UserProfile {
   updatedAt?: string;
 }
 
-export type ClientStatus = 'ativo' | 'inativo' | 'suspenso' | 'cancelado';
+export type ClientStatus = 'ativo' | 'inativo' | 'pausado' | 'suspenso' | 'cancelado';
 
 export interface Client {
   id: string;
@@ -40,6 +40,10 @@ export interface Client {
   status: ClientStatus;
   notes?: string;
   congratulatedYear?: number;
+  pausedAt?: string;
+  pauseReason?: string;
+  reactivatedAt?: string;
+  suspendFutureBilling?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -98,6 +102,8 @@ export interface Contract {
   updatedAt?: string;
 }
 
+export type RevenueSource = 'agencia' | 'produto' | 'servico_avulso';
+
 export type ReceivableStatus = 'pendente' | 'recebido' | 'parcial' | 'vencido' | 'cancelado';
 
 export interface Receivable {
@@ -105,6 +111,10 @@ export interface Receivable {
   clientId: string;
   clientName: string;
   contractId?: string;
+  revenueSource?: RevenueSource; // Fonte A (agencia), Fonte B (produto), Fonte C (servico_avulso)
+  saleId?: string; // Link para a venda correspondente (evita duplicação)
+  itemType?: 'produto' | 'servico';
+  category?: string;
   description: string;
   dueDate: string; // YYYY-MM-DD
   competence: string; // MM/YYYY
@@ -166,9 +176,65 @@ export interface Task {
   description?: string;
   assignedTo?: string;
   priority: TaskPriority;
-  dueDate: string;
+  requestedDate?: string; // Data do pedido / solicitação
+  dueDate: string; // Data do prazo / entrega limite
+  completedAt?: string; // Data de conclusão real quando finalizada
   status: TaskStatus;
   comments?: TaskComment[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+// ==================== PRODUTOS & SERVIÇOS AVULSOS ====================
+export type ProductServiceType = 'produto' | 'servico';
+export type ProductServiceStatus = 'ativo' | 'inativo';
+
+export interface ProductService {
+  id: string;
+  code: string;
+  name: string;
+  type: ProductServiceType;
+  category: string;
+  defaultPrice: number;
+  costPrice?: number;
+  stockQuantity?: number;
+  description?: string;
+  status: ProductServiceStatus;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ProductCategory {
+  id: string;
+  name: string;
+  type?: 'produto' | 'servico' | 'ambos';
+  createdAt?: string;
+}
+
+export type SaleFinancialStatus = 'pendente' | 'parcial' | 'pago' | 'cancelado';
+
+export interface Sale {
+  id: string;
+  code: string;
+  itemId: string;
+  itemName: string;
+  itemType: ProductServiceType;
+  category: string;
+  saleDate: string; // YYYY-MM-DD
+  quantity: number;
+  unitPrice: number;
+  discount: number;
+  totalAmount: number; // (quantity * unitPrice) - discount
+  buyerName?: string;
+  buyerContact?: string;
+  paymentMethod: string;
+  financialStatus: SaleFinancialStatus;
+  status?: SaleFinancialStatus; // Alias for financialStatus
+  paymentDate?: string; // Data real de recebimento quando confirmado
+  paidAmount: number;
+  notes?: string;
+  receivableId?: string; // Sincronizado no financeiro
   createdAt?: string;
   updatedAt?: string;
 }
@@ -241,6 +307,7 @@ export type ActiveTab =
   | 'plans'
   | 'contracts'
   | 'financial'
+  | 'products_services'
   | 'birthdays'
   | 'tasks'
   | 'documents'
