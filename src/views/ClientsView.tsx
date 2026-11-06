@@ -24,8 +24,9 @@ import {
   Send,
   Sparkles,
 } from 'lucide-react';
+import confetti from 'canvas-confetti';
 import { Client, ClientStatus, Contract, Receivable, Task, AppDocument, ContactLog } from '../types';
-import { createClient, updateClient, deleteClient, createContract } from '../services/db';
+import { createClient, updateClient, deleteClient, createContract, registerReceivablePayment } from '../services/db';
 import { useAuth } from '../context/AuthContext';
 import { WhatsAppModal, WhatsAppTemplateKey } from '../components/common/WhatsAppModal';
 
@@ -59,6 +60,10 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
   const [targetWhatsAppClient, setTargetWhatsAppClient] = useState<Client | null>(null);
   const [whatsAppTemplate, setWhatsAppTemplate] = useState<WhatsAppTemplateKey>('boas_vindas');
   const [whatsAppVariables, setWhatsAppVariables] = useState<any>({});
+
+  // Deletion Modal state
+  const [clientToDelete, setClientToDelete] = useState<Client | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Form State for New Client
   const [formData, setFormData] = useState({
@@ -125,6 +130,26 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
     setWhatsAppModalOpen(true);
   };
 
+  const handleDeleteClient = async (permanent: boolean) => {
+    if (!clientToDelete) return;
+    setIsDeleting(true);
+    try {
+      const userEmail = user?.email || 'agenciaraon@gmail.com';
+      await deleteClient(clientToDelete.id, clientToDelete.companyName, userEmail, permanent);
+      alert(permanent ? `Cliente ${clientToDelete.companyName} excluído definitivamente!` : `Cliente ${clientToDelete.companyName} inativado/cancelado!`);
+      setClientToDelete(null);
+      if (selectedClientForDetail?.id === clientToDelete.id) {
+        setSelectedClientForDetail(null);
+      }
+      onRefresh();
+    } catch (err: any) {
+      console.error('Erro ao excluir cliente:', err);
+      alert('Erro ao excluir cliente: ' + (err?.message || 'Tente novamente.'));
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const handleCreateClient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.companyName || !formData.responsibleName || !formData.whatsapp) {
@@ -133,7 +158,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
     }
 
     try {
-      const userEmail = user?.email || 'somosraon@gmail.com';
+      const userEmail = user?.email || 'agenciaraon@gmail.com';
       const newClientId = await createClient(
         {
           ...formData,
@@ -145,33 +170,39 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
       );
 
       // Automatically generate contract and recurring receivables
-      if (Number(formData.monthlyFee) > 0) {
-        await createContract(
-          {
-            contractNumber: `CTR-${new Date().getFullYear()}-${String(clients.length + 1).padStart(3, '0')}`,
-            clientId: newClientId,
-            clientName: formData.companyName,
-            planId: '',
-            planName: formData.planName,
-            monthlyFee: Number(formData.monthlyFee),
-            startDate: formData.entryDate,
-            dueDay: Number(formData.dueDay),
-            paymentMethod: 'PIX',
-            discount: 0,
-            services: [],
-            status: 'vigente',
-            createdAt: new Date().toISOString(),
-          },
-          userEmail,
-          6 // 6 months of receivables generated
-        );
+      if (Number(formData.monthlyFee) > 0 && newClientId) {
+        try {
+          await createContract(
+            {
+              contractNumber: `CTR-${new Date().getFullYear()}-${String(clients.length + 1).padStart(3, '0')}`,
+              clientId: newClientId,
+              clientName: formData.companyName,
+              planId: '',
+              planName: formData.planName,
+              monthlyFee: Number(formData.monthlyFee),
+              startDate: formData.entryDate,
+              dueDay: Number(formData.dueDay),
+              paymentMethod: 'PIX',
+              discount: 0,
+              services: [],
+              status: 'vigente',
+              createdAt: new Date().toISOString(),
+            },
+            userEmail,
+            6 // 6 months of receivables generated
+          );
+        } catch (contractErr) {
+          console.warn('Aviso na criação de contrato automático:', contractErr);
+        }
       }
 
       setIsNewModalOpen(false);
+      confetti({ particleCount: 60, spread: 55, origin: { y: 0.6 } });
+      alert(`Cliente ${formData.companyName} (${nextAutoCode}) cadastrado com sucesso!`);
       onRefresh();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Erro ao cadastrar cliente:', err);
-      alert('Não foi possível salvar o cliente. Verifique as permissões.');
+      alert('Não foi possível salvar o cliente: ' + (err?.message || 'Verifique a conexão.'));
     }
   };
 
@@ -366,6 +397,15 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                           >
                             <Eye className="w-3.5 h-3.5" />
                             <span>Ficha</span>
+                          </button>
+
+                          {/* Delete / Inactivate Trigger */}
+                          <button
+                            onClick={() => setClientToDelete(client)}
+                            className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500 text-red-600 hover:text-white transition-all shadow-xs"
+                            title={`Excluir ou inativar ${client.companyName}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       </td>
@@ -607,6 +647,69 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
         </div>
       )}
 
+      {/* ==================== MODAL: EXCLUSÃO DE CLIENTE ==================== */}
+      {clientToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+          <div className="relative w-full max-w-md bg-white dark:bg-[#10192A] rounded-2xl shadow-2xl border border-red-200 dark:border-red-900/50 overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 bg-red-600 text-white">
+              <div className="flex items-center gap-2">
+                <Trash2 className="w-5 h-5 text-white" />
+                <h3 className="font-bold text-base">Excluir / Inativar Cliente</h3>
+              </div>
+              <button
+                onClick={() => setClientToDelete(null)}
+                className="p-1 text-red-200 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="p-3 bg-red-50 dark:bg-red-950/30 rounded-xl border border-red-200 dark:border-red-900/40 text-xs text-red-800 dark:text-red-200">
+                <p className="font-bold text-sm mb-1">{clientToDelete.companyName}</p>
+                <p className="text-slate-600 dark:text-slate-400">
+                  Código: <span className="font-mono font-bold text-red-700 dark:text-red-300">{clientToDelete.code}</span> | Responsável: {clientToDelete.responsibleName}
+                </p>
+              </div>
+
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                Você pode optar por <strong>excluir definitivamente</strong> do banco de dados ou <strong>inativar/cancelar</strong> mantendo o histórico de relatórios:
+              </p>
+
+              <div className="space-y-2 pt-1">
+                <button
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={() => handleDeleteClient(true)}
+                  className="w-full py-2.5 px-4 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-colors disabled:opacity-50"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>{isDeleting ? 'Excluindo...' : 'Excluir Definitivamente do Sistema'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={() => handleDeleteClient(false)}
+                  className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-colors disabled:opacity-50"
+                >
+                  <AlertCircle className="w-4 h-4" />
+                  <span>Apenas Inativar / Cancelar (Manter Histórico)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setClientToDelete(null)}
+                  className="w-full py-2 px-4 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  Voltar / Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ==================== FICHA INDIVIDUAL DO CLIENTE (7 ABAS OBRIGATÓRIAS) ==================== */}
       {selectedClientForDetail && (
         <ClientDetailModal
@@ -619,6 +722,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
           onClose={() => setSelectedClientForDetail(null)}
           onOpenWhatsApp={(tpl) => handleOpenWhatsApp(selectedClientForDetail, tpl)}
           onRefresh={onRefresh}
+          onRequestDelete={(client) => setClientToDelete(client)}
         />
       )}
 
@@ -654,6 +758,7 @@ interface ClientDetailModalProps {
   onClose: () => void;
   onOpenWhatsApp: (tpl?: WhatsAppTemplateKey) => void;
   onRefresh: () => void;
+  onRequestDelete?: (client: Client) => void;
 }
 
 const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
@@ -666,6 +771,7 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
   onClose,
   onOpenWhatsApp,
   onRefresh,
+  onRequestDelete,
 }) => {
   const { user, isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState<
@@ -674,9 +780,38 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
 
   const [editClient, setEditClient] = useState({ ...client });
   const [isSaving, setIsSaving] = useState(false);
+  const [confirmingRecId, setConfirmingRecId] = useState<string | null>(null);
 
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0);
+  };
+
+  const handleConfirmReceipt = async (r: Receivable) => {
+    setConfirmingRecId(r.id);
+    try {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const amount = Number(r.originalAmount) - (Number(r.paidAmount) || 0);
+      const userEmail = user?.email || 'agenciaraon@gmail.com';
+      await registerReceivablePayment(
+        r.id,
+        amount,
+        0,
+        'PIX',
+        todayStr,
+        userEmail,
+        'Recebimento confirmado pelo gestor'
+      );
+      confetti({ particleCount: 50, spread: 60, origin: { y: 0.6 } });
+      alert(
+        `✓ Pagamento de ${formatCurrency(amount)} confirmado com sucesso!\nO valor já entrou imediatamente no faturamento recebido e no resultado financeiro do Dashboard.`
+      );
+      onRefresh();
+    } catch (err: any) {
+      console.error('Erro ao confirmar recebimento:', err);
+      alert('Erro ao confirmar recebimento: ' + (err?.message || 'Tente novamente.'));
+    } finally {
+      setConfirmingRecId(null);
+    }
   };
 
   const handleSaveGeneralData = async () => {
@@ -873,7 +1008,15 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                 />
               </div>
 
-              <div className="flex justify-end pt-2">
+              <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => onRequestDelete?.(client)}
+                  className="px-4 py-2.5 bg-red-500/10 hover:bg-red-600 hover:text-white text-red-600 border border-red-500/20 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Excluir / Inativar Cliente</span>
+                </button>
                 <button
                   type="button"
                   onClick={handleSaveGeneralData}
@@ -939,9 +1082,20 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
             </div>
           )}
 
-          {/* TAB 4: FINANCEIRO (EXTRATO) */}
+          {/* TAB 4: FINANCEIRO (EXTRATO & CONFIRMAÇÃO DE RECEBIMENTO) */}
           {activeTab === 'financeiro' && (
             <div className="space-y-3">
+              {/* Guidance Banner */}
+              <div className="p-3 bg-blue-50 dark:bg-blue-950/30 rounded-xl border border-blue-200 dark:border-blue-900/40 text-xs text-blue-900 dark:text-blue-200 flex items-start gap-2.5">
+                <Clock className="w-4 h-4 text-[#0878D9] shrink-0 mt-0.5" />
+                <div>
+                  <strong className="font-bold">Confirmação de Recebimento no Vencimento:</strong>
+                  <p className="text-[11px] text-blue-700 dark:text-blue-300 mt-0.5">
+                    Quando o cliente realizar o pagamento na data de vencimento, clique no botão <strong>"✓ Confirmar que Já Recebi"</strong>. O valor só entra no cálculo de <strong>Faturamento Recebido</strong> e no <strong>Resultado Financeiro do Dashboard</strong> após esta confirmação.
+                  </p>
+                </div>
+              </div>
+
               <div className="grid grid-cols-3 gap-3 mb-2">
                 <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
                   <span className="text-[10px] font-bold uppercase">Total Recebido</span>
@@ -982,7 +1136,7 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                       <th className="py-2">Valor</th>
                       <th className="py-2">Pago</th>
                       <th className="py-2">Status</th>
-                      <th className="py-2 text-right">Ação</th>
+                      <th className="py-2 text-right">Confirmação & Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -1006,17 +1160,34 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                           </span>
                         </td>
                         <td className="py-2.5 text-right">
-                          <button
-                            onClick={() =>
-                              onOpenWhatsApp(
-                                r.status === 'vencido' ? 'cobranca_atraso' : 'cobranca_hoje'
-                              )
-                            }
-                            className="p-1 rounded text-[#25D366] hover:bg-[#25D366]/10"
-                            title="Cobrar via WhatsApp"
-                          >
-                            <MessageCircle className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            {r.status !== 'recebido' ? (
+                              <button
+                                onClick={() => handleConfirmReceipt(r)}
+                                disabled={confirmingRecId === r.id}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] rounded-lg shadow-xs flex items-center gap-1 transition-all disabled:opacity-50"
+                                title="Confirmar que o valor foi recebido e creditar no Dashboard"
+                              >
+                                <CheckCircle className="w-3.5 h-3.5" />
+                                <span>{confirmingRecId === r.id ? 'Gravando...' : '✓ Confirmar que Já Recebi'}</span>
+                              </button>
+                            ) : (
+                              <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                                Pago no Dashboard ✓
+                              </span>
+                            )}
+                            <button
+                              onClick={() =>
+                                onOpenWhatsApp(
+                                  r.status === 'vencido' ? 'cobranca_atraso' : 'cobranca_hoje'
+                                )
+                              }
+                              className="p-1 rounded text-[#25D366] hover:bg-[#25D366]/10"
+                              title="Cobrar via WhatsApp"
+                            >
+                              <MessageCircle className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}

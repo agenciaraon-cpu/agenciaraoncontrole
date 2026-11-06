@@ -17,7 +17,7 @@ interface AuthContextType {
   setSimulatedRole: (role: UserRole) => void;
   isSimulatingRole: boolean;
   resetSimulatedRole: () => void;
-  loginDemo: (role: UserRole) => void;
+  loginDemo: (role: UserRole, emailChoice?: string) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -87,19 +87,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           });
         }
       } else {
-        // If demo mode was active, preserve it
-        if (isDemoActive) {
-          const demoRole = (localStorage.getItem('raon_demo_role') as UserRole) || 'ADMINISTRADOR';
-          setProfile({
-            id: 'demo-user-id',
-            email: demoRole === 'ADMINISTRADOR' ? 'somosraon@gmail.com' : 'equipe@agenciaraon.com',
-            name: demoRole === 'ADMINISTRADOR' ? 'Raon Administrador' : demoRole === 'FINANCEIRO' ? 'Analista Financeiro' : 'Especialista Criativo',
-            role: demoRole,
-            active: true,
-          });
-        } else {
-          setProfile(null);
-        }
+        // Default active session for Agência Raon Administrator
+        const demoRole = (localStorage.getItem('raon_demo_role') as UserRole) || 'ADMINISTRADOR';
+        const savedEmail = localStorage.getItem('raon_admin_email') || 'agenciaraon@gmail.com';
+        setProfile({
+          id: 'admin-raon-master',
+          email: demoRole === 'ADMINISTRADOR' ? savedEmail : `${demoRole.toLowerCase()}@agenciaraon.com`,
+          name: demoRole === 'ADMINISTRADOR' ? 'Administrador Geral (Agência Raon)' : demoRole === 'FINANCEIRO' ? 'Gestão Financeira' : 'Operação & Criativo',
+          role: demoRole,
+          active: true,
+        });
       }
       setLoading(false);
     });
@@ -127,14 +124,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await signOut(auth).catch(() => {});
   };
 
-  const loginDemo = (role: UserRole) => {
+  const loginDemo = (role: UserRole, emailChoice: string = 'agenciaraon@gmail.com') => {
     localStorage.setItem('raon_demo_active', 'true');
     localStorage.setItem('raon_demo_role', role);
+    localStorage.setItem('raon_admin_email', emailChoice);
     setIsDemoActive(true);
     setProfile({
-      id: `demo-${role.toLowerCase()}`,
-      email: role === 'ADMINISTRADOR' ? 'somosraon@gmail.com' : `${role.toLowerCase()}@agenciaraon.com`,
-      name: role === 'ADMINISTRADOR' ? 'Diretoria Raon' : role === 'FINANCEIRO' ? 'Gestão Financeira' : 'Operação & Criativo',
+      id: `admin-${role.toLowerCase()}`,
+      email: role === 'ADMINISTRADOR' ? emailChoice : `${role.toLowerCase()}@agenciaraon.com`,
+      name: role === 'ADMINISTRADOR' ? `Administrador Geral (${emailChoice})` : role === 'FINANCEIRO' ? 'Gestão Financeira' : 'Operação & Criativo',
       role: role,
       active: true,
     });

@@ -140,17 +140,22 @@ export async function updateClient(id: string, updates: Partial<Client>, userEma
   }
 }
 
-export async function deleteClient(id: string, clientName: string, userEmail: string): Promise<void> {
+export async function deleteClient(id: string, clientName: string, userEmail: string, permanent: boolean = true): Promise<void> {
   try {
-    // Soft delete preferencial: set status to cancelado
-    const docRef = doc(db, 'clients', id);
-    await updateDoc(docRef, {
-      status: 'cancelado',
-      updatedAt: new Date().toISOString(),
-    });
-    await logAudit(userEmail, 'user', 'client', id, 'cancel', `Cancelamento do cliente ${clientName}`);
+    if (permanent) {
+      await deleteDoc(doc(db, 'clients', id));
+      await logAudit(userEmail, 'user', 'client', id, 'delete', `Exclusão permanente do cliente ${clientName}`);
+    } else {
+      const docRef = doc(db, 'clients', id);
+      await updateDoc(docRef, {
+        status: 'cancelado',
+        updatedAt: new Date().toISOString(),
+      });
+      await logAudit(userEmail, 'user', 'client', id, 'cancel', `Cancelamento do cliente ${clientName}`);
+    }
   } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, `clients/${id}`);
+    console.error('Erro ao excluir cliente:', err);
+    handleFirestoreError(err, OperationType.DELETE, `clients/${id}`);
   }
 }
 

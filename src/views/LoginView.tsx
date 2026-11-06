@@ -82,18 +82,36 @@ export const LoginView: React.FC = () => {
         {/* Quick Role Selection for internal operation */}
         <div className="space-y-2">
           <button
-            onClick={() => handleDemoLogin('ADMINISTRADOR')}
-            className="w-full flex items-center justify-between p-3 rounded-2xl bg-[#102B59]/5 hover:bg-[#102B59]/10 dark:bg-white/5 dark:hover:bg-white/10 border border-[#102B59]/20 dark:border-white/10 transition-all group"
+            onClick={() => loginDemo('ADMINISTRADOR', 'agenciaraon@gmail.com')}
+            className="w-full flex items-center justify-between p-3 rounded-2xl bg-[#0878D9]/10 hover:bg-[#0878D9]/20 border border-[#0878D9]/30 transition-all group"
+          >
+            <div className="text-left">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#0878D9]" />
+                <h4 className="text-xs font-bold text-slate-800 dark:text-white">
+                  Administrador Geral — agenciaraon@gmail.com
+                </h4>
+              </div>
+              <p className="text-[10px] text-slate-500 ml-4">
+                Acesso total irrestrito para gestão comercial, financeira e exclusões
+              </p>
+            </div>
+            <ArrowRight className="w-4 h-4 text-[#0878D9] group-hover:translate-x-1 transition-transform" />
+          </button>
+
+          <button
+            onClick={() => loginDemo('ADMINISTRADOR', 'somosraon@gmail.com')}
+            className="w-full flex items-center justify-between p-3 rounded-2xl bg-[#FF7817]/10 hover:bg-[#FF7817]/20 border border-[#FF7817]/30 transition-all group"
           >
             <div className="text-left">
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-[#FF7817]" />
                 <h4 className="text-xs font-bold text-slate-800 dark:text-white">
-                  Acesso Administrador
+                  Administrador Geral — somosraon@gmail.com
                 </h4>
               </div>
               <p className="text-[10px] text-slate-500 ml-4">
-                somosraon@gmail.com — Acesso irrestrito a todos os módulos
+                Diretoria Raon — Acesso completo ao sistema
               </p>
             </div>
             <ArrowRight className="w-4 h-4 text-[#FF7817] group-hover:translate-x-1 transition-transform" />

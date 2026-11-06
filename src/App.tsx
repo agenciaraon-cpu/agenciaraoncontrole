@@ -204,6 +204,7 @@ const AppContent: React.FC = () => {
                   receivables={receivables}
                   expenses={expenses}
                   onNavigate={setCurrentTab}
+                  onRefresh={loadAllData}
                 />
               )}
 

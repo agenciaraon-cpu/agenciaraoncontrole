@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Users,
   UserCheck,
@@ -14,10 +14,12 @@ import {
   Gift,
   Calendar,
   Sparkles,
+  CheckCircle,
   CheckCircle2,
   ChevronRight,
   MessageCircle,
 } from 'lucide-react';
+import confetti from 'canvas-confetti';
 import {
   ResponsiveContainer,
   BarChart,
@@ -37,6 +39,7 @@ import {
 } from 'recharts';
 import { Client, Contract, Receivable, Expense, ActiveTab } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { registerReceivablePayment } from '../services/db';
 
 interface DashboardViewProps {
   clients: Client[];
@@ -45,6 +48,7 @@ interface DashboardViewProps {
   expenses: Expense[];
   onNavigate: (tab: ActiveTab) => void;
   onOpenWhatsAppForClient?: (client: Client) => void;
+  onRefresh?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -54,13 +58,55 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   expenses,
   onNavigate,
   onOpenWhatsAppForClient,
+  onRefresh,
 }) => {
   const { isCollaborator } = useAuth();
+  const [confirmingRecId, setConfirmingRecId] = useState<string | null>(null);
 
   const now = new Date();
   const currentMonthNum = String(now.getMonth() + 1).padStart(2, '0');
   const currentYear = now.getFullYear();
   const currentCompetence = `${currentMonthNum}/${currentYear}`;
+  const todayStr = now.toISOString().split('T')[0];
+
+  const formatCurrency = (val: number) => {
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0);
+  };
+
+  // Pending receivables that have reached or passed their due date (or current competence)
+  const pendingDueReceivables = useMemo(() => {
+    return receivables
+      .filter((r) => r.status !== 'recebido')
+      .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  }, [receivables]);
+
+  // Handler to confirm receipt directly from Dashboard
+  const handleConfirmReceipt = async (r: Receivable) => {
+    setConfirmingRecId(r.id);
+    try {
+      const amount = Number(r.originalAmount) - (Number(r.paidAmount) || 0);
+      const userEmail = 'agenciaraon@gmail.com';
+      await registerReceivablePayment(
+        r.id,
+        amount,
+        0,
+        'PIX',
+        todayStr,
+        userEmail,
+        'Recebimento confirmado diretamente pelo Dashboard'
+      );
+      confetti({ particleCount: 50, spread: 60, origin: { y: 0.6 } });
+      alert(
+        `✓ Pagamento de ${formatCurrency(amount)} de ${r.clientName} confirmado com sucesso!\nO valor entrou instantaneamente no Faturamento Recebido e no Resultado Financeiro do Dashboard.`
+      );
+      onRefresh?.();
+    } catch (err: any) {
+      console.error('Erro ao confirmar recebimento no dashboard:', err);
+      alert('Erro ao confirmar recebimento: ' + (err?.message || 'Tente novamente.'));
+    } finally {
+      setConfirmingRecId(null);
+    }
+  };
 
   // 12 Mandatory Indicators calculated from real data
   const metrics = useMemo(() => {
@@ -229,10 +275,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       .slice(0, 5);
   }, [contracts]);
 
-  const formatCurrency = (val: number) => {
-    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0);
-  };
-
   return (
     <div className="space-y-6">
       {/* Welcome Banner */}
@@ -279,6 +321,117 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         {/* Ambient Glow */}
         <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-[#FF7817]/20 rounded-full blur-3xl pointer-events-none" />
+      </div>
+
+      {/* ==================== AVISO & CONFIRMAÇÃO DE RECEBIMENTOS NO VENCIMENTO ==================== */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#10192A] border border-blue-200 dark:border-blue-900/50 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-[#0878D9]/10 text-[#0878D9]">
+              <Clock className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-sm text-slate-800 dark:text-white flex items-center gap-2">
+                Pagamentos no Vencimento — Aguardando Confirmação
+                {pendingDueReceivables.length > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-black">
+                    {pendingDueReceivables.length} para confirmar
+                  </span>
+                )}
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                O valor só entra no <strong>Faturamento Recebido</strong> e no <strong>Resultado Financeiro</strong> após você confirmar o recebimento abaixo.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => onNavigate('financial')}
+            className="text-xs font-bold text-[#0878D9] hover:underline flex items-center gap-1 self-start sm:self-auto"
+          >
+            Ver módulo financeiro completo <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {pendingDueReceivables.length === 0 ? (
+          <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/30 text-emerald-800 dark:text-emerald-300 flex items-center gap-2 text-xs font-semibold">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <span>Excelente! Não há cobranças pendentes aguardando confirmação no momento. Todos os recebimentos confirmados já constam nas métricas abaixo.</span>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {pendingDueReceivables.slice(0, 4).map((r) => {
+              const isOverdue = r.dueDate < todayStr;
+              const isDueToday = r.dueDate === todayStr;
+
+              return (
+                <div
+                  key={r.id}
+                  className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-[#0878D9] transition-all"
+                >
+                  <div className="flex items-start gap-3">
+                    <div
+                      className={`p-2 rounded-lg shrink-0 mt-0.5 ${
+                        isOverdue
+                          ? 'bg-red-500/10 text-red-600'
+                          : isDueToday
+                          ? 'bg-amber-500/10 text-amber-600'
+                          : 'bg-blue-500/10 text-[#0878D9]'
+                      }`}
+                    >
+                      <DollarSign className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-xs text-slate-800 dark:text-white">
+                          {r.clientName}
+                        </span>
+                        <span
+                          className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                            isOverdue
+                              ? 'bg-red-500/10 text-red-600'
+                              : isDueToday
+                              ? 'bg-amber-500/10 text-amber-600'
+                              : 'bg-blue-500/10 text-[#0878D9]'
+                          }`}
+                        >
+                          {isOverdue ? 'Vencido' : isDueToday ? 'Vence Hoje' : 'No Vencimento'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        {r.description} • Competência: <strong>{r.competence}</strong> • Vencimento: <strong>{r.dueDate}</strong>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between sm:justify-end gap-3 self-end sm:self-auto w-full sm:w-auto">
+                    <span className="text-sm font-black text-slate-800 dark:text-white">
+                      {formatCurrency(Number(r.originalAmount) - (Number(r.paidAmount) || 0))}
+                    </span>
+                    <button
+                      onClick={() => handleConfirmReceipt(r)}
+                      disabled={confirmingRecId === r.id}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition-all hover:scale-105 disabled:opacity-50"
+                      title="Confirmar que você já recebeu este valor e debitar para o financeiro do Dashboard"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>{confirmingRecId === r.id ? 'Confirmando...' : '✓ Confirmar que Já Recebi'}</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+            {pendingDueReceivables.length > 4 && (
+              <div className="text-center pt-1">
+                <button
+                  onClick={() => onNavigate('financial')}
+                  className="text-xs font-bold text-[#0878D9] hover:underline"
+                >
+                  Ver mais {pendingDueReceivables.length - 4} cobranças no financeiro
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 12 Mandated Indicators Grid */}
