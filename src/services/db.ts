@@ -820,13 +820,31 @@ export async function getTasks(): Promise<Task[]> {
 
 export async function createTask(task: Omit<Task, 'id'>, userEmail: string): Promise<string> {
   try {
-    const docRef = await addDoc(collection(db, 'tasks'), {
+    const rawData: Record<string, any> = {
       ...task,
+      title: (task.title || '').trim(),
+      serviceName: task.serviceName || 'Geral',
+      assignedTo: task.assignedTo || 'Equipe Raon',
+      priority: task.priority || 'media',
+      status: task.status || 'a_fazer',
       comments: task.comments || [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+    };
+
+    // Strip any undefined value to prevent Firestore "Unsupported field value: undefined" error
+    Object.keys(rawData).forEach((key) => {
+      if (rawData[key] === undefined) {
+        delete rawData[key];
+      }
     });
-    await logAudit(userEmail, 'user', 'task', docRef.id, 'create', `Criação da tarefa: ${task.title}`);
+
+    const docRef = await addDoc(collection(db, 'tasks'), rawData);
+    try {
+      await logAudit(userEmail || 'agenciaraon@gmail.com', 'user', 'task', docRef.id, 'create', `Criação da tarefa: ${task.title}`);
+    } catch (auditErr) {
+      console.warn('Aviso ao registrar auditoria de tarefa:', auditErr);
+    }
     return docRef.id;
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, 'tasks');
@@ -835,11 +853,24 @@ export async function createTask(task: Omit<Task, 'id'>, userEmail: string): Pro
 
 export async function updateTask(id: string, updates: Partial<Task>, userEmail: string): Promise<void> {
   try {
-    await updateDoc(doc(db, 'tasks', id), {
+    const cleanUpdates: Record<string, any> = {
       ...updates,
       updatedAt: new Date().toISOString(),
+    };
+
+    // Strip any undefined value to prevent Firestore "Unsupported field value: undefined" error
+    Object.keys(cleanUpdates).forEach((key) => {
+      if (cleanUpdates[key] === undefined) {
+        delete cleanUpdates[key];
+      }
     });
-    await logAudit(userEmail, 'user', 'task', id, 'update', `Atualização da tarefa ID ${id}`);
+
+    await updateDoc(doc(db, 'tasks', id), cleanUpdates);
+    try {
+      await logAudit(userEmail || 'agenciaraon@gmail.com', 'user', 'task', id, 'update', `Atualização da tarefa ID ${id}`);
+    } catch (auditErr) {
+      console.warn('Aviso ao registrar auditoria de tarefa:', auditErr);
+    }
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, `tasks/${id}`);
   }
@@ -1019,19 +1050,33 @@ export async function getProductsServices(): Promise<ProductService[]> {
 
 export async function createProductService(item: Omit<ProductService, 'id'>, userEmail: string): Promise<string> {
   try {
-    const docRef = await addDoc(collection(db, 'products_services'), {
+    const rawItem: Record<string, any> = {
       ...item,
+      name: (item.name || '').trim(),
+      category: item.category || (item.type === 'produto' ? 'Produto' : 'Serviço Avulso'),
+      defaultPrice: Number(item.defaultPrice) || 0,
+      costPrice: Number(item.costPrice) || 0,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+    };
+
+    Object.keys(rawItem).forEach((k) => {
+      if (rawItem[k] === undefined) delete rawItem[k];
     });
-    await logAudit(
-      userEmail,
-      'user',
-      'product_service',
-      docRef.id,
-      'create',
-      `Cadastro de ${item.type}: ${item.name} (${item.code || ''}) - R$ ${item.defaultPrice}`
-    );
+
+    const docRef = await addDoc(collection(db, 'products_services'), rawItem);
+    try {
+      await logAudit(
+        userEmail || 'agenciaraon@gmail.com',
+        'user',
+        'product_service',
+        docRef.id,
+        'create',
+        `Cadastro de ${item.type}: ${item.name} (${item.code || ''}) - R$ ${item.defaultPrice}`
+      );
+    } catch (auditErr) {
+      console.warn('Aviso em auditoria de produto:', auditErr);
+    }
     return docRef.id;
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, 'products_services');
@@ -1040,11 +1085,21 @@ export async function createProductService(item: Omit<ProductService, 'id'>, use
 
 export async function updateProductService(id: string, updates: Partial<ProductService>, userEmail: string): Promise<void> {
   try {
-    await updateDoc(doc(db, 'products_services', id), {
+    const cleanUpdates: Record<string, any> = {
       ...updates,
       updatedAt: new Date().toISOString(),
+    };
+
+    Object.keys(cleanUpdates).forEach((k) => {
+      if (cleanUpdates[k] === undefined) delete cleanUpdates[k];
     });
-    await logAudit(userEmail, 'user', 'product_service', id, 'update', `Atualização do item ID ${id}`);
+
+    await updateDoc(doc(db, 'products_services', id), cleanUpdates);
+    try {
+      await logAudit(userEmail || 'agenciaraon@gmail.com', 'user', 'product_service', id, 'update', `Atualização do item ID ${id}`);
+    } catch (auditErr) {
+      console.warn('Aviso em auditoria:', auditErr);
+    }
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, `products_services/${id}`);
   }
@@ -1111,34 +1166,38 @@ export async function getSales(): Promise<Sale[]> {
 
 export async function createSale(saleData: Omit<Sale, 'id'>, userEmail: string): Promise<string> {
   try {
-    // 1. Create Sale document
-    const saleCol = collection(db, 'sales');
-    const saleDocRef = await addDoc(saleCol, {
+    const cleanSaleData: Record<string, any> = {
       ...saleData,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+    };
+    Object.keys(cleanSaleData).forEach((k) => {
+      if (cleanSaleData[k] === undefined) delete cleanSaleData[k];
     });
+
+    // 1. Create Sale document
+    const saleCol = collection(db, 'sales');
+    const saleDocRef = await addDoc(saleCol, cleanSaleData);
 
     const saleId = saleDocRef.id;
     const isPaid = saleData.financialStatus === 'pago';
     const isPartial = saleData.financialStatus === 'parcial';
     const finalPaid = isPaid ? saleData.totalAmount : isPartial ? (saleData.paidAmount || 0) : 0;
     const finalStatus = isPaid ? 'recebido' : isPartial ? 'parcial' : saleData.financialStatus === 'cancelado' ? 'cancelado' : 'pendente';
-    const paymentDate = (isPaid || isPartial) ? (saleData.paymentDate || saleData.saleDate) : undefined;
+    const safePaymentDate = (isPaid || isPartial) ? (saleData.paymentDate || saleData.saleDate) : null;
 
     // Derive competence MM/YYYY from saleDate (YYYY-MM-DD)
-    const [y, m] = saleData.saleDate.split('-');
+    const [y, m] = (saleData.saleDate || '').split('-');
     const competence = m && y ? `${m}/${y}` : `${String(new Date().getMonth() + 1).padStart(2, '0')}/${new Date().getFullYear()}`;
 
     // 2. Automatically create matching Receivable with revenueSource: 'produto' or 'servico_avulso'
-    // This integrates directly into the financial module with zero duplication!
-    const recRef = await addDoc(collection(db, 'receivables'), {
+    const recPayload: Record<string, any> = {
       clientId: '',
       clientName: saleData.buyerName ? `${saleData.buyerName} (${saleData.itemType === 'produto' ? 'Venda Produto' : 'Serviço Avulso'})` : `Venda Avulsa (${saleData.itemType === 'produto' ? 'Produto' : 'Serviço'})`,
       revenueSource: saleData.itemType === 'produto' ? 'produto' : 'servico_avulso',
       saleId: saleId,
       itemType: saleData.itemType,
-      category: saleData.category,
+      category: saleData.category || (saleData.itemType === 'produto' ? 'Produto' : 'Serviço Avulso'),
       description: `Venda ${saleData.code || 'AVULSA'}: ${saleData.itemName} (${saleData.quantity}x)`,
       dueDate: saleData.saleDate,
       competence,
@@ -1147,11 +1206,20 @@ export async function createSale(saleData: Omit<Sale, 'id'>, userEmail: string):
       paidAmount: finalPaid,
       status: finalStatus,
       paymentMethod: saleData.paymentMethod || 'PIX',
-      paymentDate,
       notes: saleData.notes || '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+    };
+
+    if (safePaymentDate) {
+      recPayload.paymentDate = safePaymentDate;
+    }
+
+    Object.keys(recPayload).forEach((k) => {
+      if (recPayload[k] === undefined) delete recPayload[k];
     });
+
+    const recRef = await addDoc(collection(db, 'receivables'), recPayload);
 
     // 3. Update sale with receivableId link
     await updateDoc(saleDocRef, { receivableId: recRef.id });

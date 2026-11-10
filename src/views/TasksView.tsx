@@ -18,6 +18,7 @@ import {
   CheckCircle2,
   ArrowUpDown,
   Sparkles,
+  Trash2,
 } from 'lucide-react';
 import { Task, TaskStatus, TaskPriority, Client } from '../types';
 import { createTask, updateTask, addTaskComment, deleteTask } from '../services/db';
@@ -38,6 +39,8 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
   const [isNewTaskOpen, setIsNewTaskOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [newCommentText, setNewCommentText] = useState('');
+  const [isSavingTask, setIsSavingTask] = useState(false);
+  const [isDeletingTask, setIsDeletingTask] = useState(false);
 
   const todayStr = new Date().toISOString().split('T')[0];
 
@@ -99,27 +102,35 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
 
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.title) return;
+    if (!formData.title.trim()) {
+      alert('Por favor, informe o título da tarefa.');
+      return;
+    }
     const cl = clients.find((c) => c.id === formData.clientId);
 
+    setIsSavingTask(true);
     try {
-      await createTask(
-        {
-          clientId: formData.clientId || undefined,
-          clientName: cl?.companyName || 'Geral Raon',
-          serviceName: formData.serviceName,
-          title: formData.title,
-          description: formData.description,
-          assignedTo: formData.assignedTo,
-          priority: formData.priority,
-          requestedDate: formData.requestedDate || todayStr,
-          dueDate: formData.dueDate,
-          status: formData.status,
-          completedAt: formData.status === 'concluida' ? todayStr : undefined,
-          comments: [],
-        },
-        user?.email || 'somosraon@gmail.com'
-      );
+      const taskPayload: Record<string, any> = {
+        clientName: cl?.companyName || 'Geral Raon',
+        serviceName: formData.serviceName.trim() || 'Geral',
+        title: formData.title.trim(),
+        description: formData.description.trim() || '',
+        assignedTo: formData.assignedTo.trim() || 'Equipe Raon',
+        priority: formData.priority || 'media',
+        requestedDate: formData.requestedDate || todayStr,
+        dueDate: formData.dueDate || todayStr,
+        status: formData.status || 'a_fazer',
+        comments: [],
+      };
+
+      if (formData.clientId) {
+        taskPayload.clientId = formData.clientId;
+      }
+      if (formData.status === 'concluida') {
+        taskPayload.completedAt = todayStr;
+      }
+
+      await createTask(taskPayload as any, user?.email || 'agenciaraon@gmail.com');
       setIsNewTaskOpen(false);
       setFormData({
         clientId: '',
@@ -132,25 +143,43 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
         dueDate: todayStr,
         status: 'a_fazer',
       });
+      alert('✓ Tarefa criada e salva com sucesso!');
       onRefresh();
-    } catch (err) {
-      console.error(err);
-      alert('Erro ao criar tarefa.');
+    } catch (err: any) {
+      console.error('Erro ao criar tarefa:', err);
+      alert('Não foi possível salvar a tarefa: ' + (err?.message || 'Verifique a conexão.'));
+    } finally {
+      setIsSavingTask(false);
     }
   };
 
   const handleUpdateStatus = async (task: Task, newStatus: TaskStatus) => {
     try {
-      const updateData: Partial<Task> = { status: newStatus };
+      const updateData: Record<string, any> = { status: newStatus };
       if (newStatus === 'concluida') {
         updateData.completedAt = todayStr;
-      } else if (task.status === 'concluida') {
-        updateData.completedAt = undefined;
       }
-      await updateTask(task.id, updateData, user?.email || 'somosraon@gmail.com');
+      await updateTask(task.id, updateData, user?.email || 'agenciaraon@gmail.com');
       onRefresh();
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error('Erro ao atualizar status da tarefa:', err);
+      alert('Erro ao atualizar status: ' + (err?.message || 'Tente novamente.'));
+    }
+  };
+
+  const handleDeleteTask = async (task: Task) => {
+    if (!confirm(`Deseja realmente excluir a tarefa "${task.title}"?`)) return;
+    setIsDeletingTask(true);
+    try {
+      await deleteTask(task.id, task.title, user?.email || 'agenciaraon@gmail.com');
+      setSelectedTask(null);
+      alert('✓ Tarefa excluída com sucesso!');
+      onRefresh();
+    } catch (err: any) {
+      console.error('Erro ao excluir tarefa:', err);
+      alert('Erro ao excluir tarefa: ' + (err?.message || 'Tente novamente.'));
+    } finally {
+      setIsDeletingTask(false);
     }
   };
 
@@ -579,6 +608,35 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
                 </div>
               </div>
             </div>
+
+            {/* Modal Footer with Actions */}
+            <div className="px-6 py-3 bg-slate-50 dark:bg-slate-900/80 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => handleDeleteTask(selectedTask)}
+                disabled={isDeletingTask}
+                className="px-3 py-1.5 bg-red-500/10 hover:bg-red-600 hover:text-white text-red-600 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeletingTask ? 'Excluindo...' : 'Excluir Tarefa'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const newSt = selectedTask.status === 'concluida' ? 'em_andamento' : 'concluida';
+                  handleUpdateStatus(selectedTask, newSt);
+                  setSelectedTask((prev) => (prev ? { ...prev, status: newSt, completedAt: newSt === 'concluida' ? todayStr : undefined } : null));
+                }}
+                className={`px-3.5 py-1.5 font-bold text-xs rounded-xl shadow-xs transition-colors ${
+                  selectedTask.status === 'concluida'
+                    ? 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                }`}
+              >
+                {selectedTask.status === 'concluida' ? 'Reabrir Tarefa' : '✓ Marcar como Concluída'}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -717,9 +775,10 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-[#0878D9] text-white font-bold rounded-xl shadow-xs"
+                  disabled={isSavingTask}
+                  className="px-5 py-2 bg-[#0878D9] hover:bg-[#0768BD] text-white font-bold rounded-xl shadow-xs transition-colors disabled:opacity-50"
                 >
-                  Salvar Tarefa
+                  {isSavingTask ? 'Salvando Tarefa...' : 'Salvar Tarefa'}
                 </button>
               </div>
             </form>

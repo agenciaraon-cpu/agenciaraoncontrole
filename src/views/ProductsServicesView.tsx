@@ -199,7 +199,7 @@ export const ProductsServicesView: React.FC<ProductsServicesViewProps> = ({
     setItemFormData({
       name: '',
       type: 'servico',
-      category: productCategories[0]?.name || 'Serviços Digitais Avulsos',
+      category: 'Serviço Avulso',
       defaultPrice: 0,
       costPrice: 0,
       stockQuantity: 0,
@@ -215,7 +215,7 @@ export const ProductsServicesView: React.FC<ProductsServicesViewProps> = ({
     setItemFormData({
       name: item.name,
       type: item.type,
-      category: item.category,
+      category: item.category || (item.type === 'produto' ? 'Produto' : 'Serviço Avulso'),
       defaultPrice: item.defaultPrice,
       costPrice: item.costPrice || 0,
       stockQuantity: item.stockQuantity || 0,
@@ -228,34 +228,35 @@ export const ProductsServicesView: React.FC<ProductsServicesViewProps> = ({
 
   const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!itemFormData.name || !itemFormData.category || itemFormData.defaultPrice <= 0) {
-      alert('Preencha os campos obrigatórios: Nome, Categoria e Valor de Venda Padrão (maior que zero).');
+    if (!itemFormData.name.trim() || Number(itemFormData.defaultPrice) <= 0) {
+      alert('Preencha os campos obrigatórios: Nome do Produto ou Serviço e Valor de Venda Padrão (maior que zero).');
       return;
     }
 
     setIsSubmitting(true);
     try {
       const userEmail = user?.email || 'agenciaraon@gmail.com';
+      const autoCategory = itemFormData.type === 'produto' ? 'Produto' : 'Serviço Avulso';
+      const itemPayload = {
+        name: itemFormData.name.trim(),
+        type: itemFormData.type,
+        category: autoCategory,
+        defaultPrice: Number(itemFormData.defaultPrice),
+        costPrice: Number(itemFormData.costPrice) || 0,
+        stockQuantity: itemFormData.type === 'produto' ? Number(itemFormData.stockQuantity) || 0 : undefined,
+        description: itemFormData.description.trim() || '',
+        status: itemFormData.status,
+        notes: itemFormData.notes.trim() || '',
+      };
+
       if (editingItem) {
-        await updateProductService(
-          editingItem.id,
-          {
-            ...itemFormData,
-            defaultPrice: Number(itemFormData.defaultPrice),
-            costPrice: Number(itemFormData.costPrice) || 0,
-            stockQuantity: itemFormData.type === 'produto' ? Number(itemFormData.stockQuantity) || 0 : undefined,
-          },
-          userEmail
-        );
+        await updateProductService(editingItem.id, itemPayload, userEmail);
         alert(`Item "${itemFormData.name}" atualizado com sucesso!`);
       } else {
         await createProductService(
           {
-            ...itemFormData,
+            ...itemPayload,
             code: nextItemCode,
-            defaultPrice: Number(itemFormData.defaultPrice),
-            costPrice: Number(itemFormData.costPrice) || 0,
-            stockQuantity: itemFormData.type === 'produto' ? Number(itemFormData.stockQuantity) || 0 : undefined,
           },
           userEmail
         );
@@ -968,27 +969,15 @@ export const ProductsServicesView: React.FC<ProductsServicesViewProps> = ({
                 </div>
 
                 {/* Auto fields */}
-                <div>
+                <div className="md:col-span-2">
                   <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
-                    Tipo de Item
+                    Tipo do Item Selecionado
                   </label>
                   <input
                     type="text"
                     disabled
-                    value={saleFormData.itemType === 'produto' ? 'FONTE B: PRODUTO' : 'FONTE C: SERVIÇO AVULSO'}
+                    value={saleFormData.itemType === 'produto' ? 'FONTE B: PRODUTO (Venda Física/Digital)' : 'FONTE C: SERVIÇO AVULSO (Sob Demanda)'}
                     className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-[#0878D9]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
-                    Categoria
-                  </label>
-                  <input
-                    type="text"
-                    value={saleFormData.category}
-                    onChange={(e) => setSaleFormData({ ...saleFormData, category: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold"
                   />
                 </div>
 
@@ -1253,25 +1242,6 @@ export const ProductsServicesView: React.FC<ProductsServicesViewProps> = ({
                   />
                 </div>
 
-                {/* Category */}
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
-                    Categoria *
-                  </label>
-                  <select
-                    required
-                    value={itemFormData.category}
-                    onChange={(e) => setItemFormData({ ...itemFormData, category: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-[#0878D9]"
-                  >
-                    <option value="">Selecione...</option>
-                    {productCategories.map((c) => (
-                      <option key={c.id} value={c.name}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
 
                 {/* Default Sale Price */}
                 <div>
