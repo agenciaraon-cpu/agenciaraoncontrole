@@ -19,6 +19,13 @@ import {
   ArrowUpDown,
   Sparkles,
   Trash2,
+  MessageCircle,
+  Bell,
+  BellRing,
+  Smartphone,
+  Copy,
+  Check,
+  ExternalLink,
 } from 'lucide-react';
 import { Task, TaskStatus, TaskPriority, Client } from '../types';
 import { createTask, updateTask, addTaskComment, deleteTask } from '../services/db';
@@ -41,6 +48,17 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
   const [newCommentText, setNewCommentText] = useState('');
   const [isSavingTask, setIsSavingTask] = useState(false);
   const [isDeletingTask, setIsDeletingTask] = useState(false);
+
+  // Celular & Notificações WhatsApp / Push
+  const [notificationPhone, setNotificationPhone] = useState<string>(() => {
+    return localStorage.getItem('raon_admin_notification_phone') || '(75) 98864-4742';
+  });
+  const [isPhoneModalOpen, setIsPhoneModalOpen] = useState(false);
+  const [tempPhone, setTempPhone] = useState(notificationPhone);
+  const [notificationModalOpen, setNotificationModalOpen] = useState(false);
+  const [notificationTargetTask, setNotificationTargetTask] = useState<Task | null>(null);
+  const [isDigestMode, setIsDigestMode] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const todayStr = new Date().toISOString().split('T')[0];
 
@@ -224,6 +242,113 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
     urgente: { text: 'text-red-600', bg: 'bg-red-50 dark:bg-red-950/40' },
   };
 
+  // Tarefas com vencimento HOJE e atrasadas
+  const tasksDueToday = useMemo(() => {
+    return tasks.filter(
+      (t) => t.dueDate === todayStr && t.status !== 'concluida' && t.status !== 'cancelada'
+    );
+  }, [tasks, todayStr]);
+
+  const tasksOverdue = useMemo(() => {
+    return tasks.filter(
+      (t) => t.dueDate < todayStr && t.status !== 'concluida' && t.status !== 'cancelada'
+    );
+  }, [tasks, todayStr]);
+
+  const generateSingleTaskMessage = (t: Task) => {
+    const priorityEmoji = t.priority === 'urgente' ? '🔴' : t.priority === 'alta' ? '🟠' : '🔵';
+    return (
+      `🚨 *LEMBRETE DE TAREFA NO VENCIMENTO — AGÊNCIA RAON* 🚀\n\n` +
+      `📌 *Tarefa:* ${t.title}\n` +
+      `🏢 *Cliente:* ${t.clientName || 'Geral Raon'}\n` +
+      `🛠️ *Serviço:* ${t.serviceName || 'Operacional'}\n` +
+      `📅 *Prazo de Entrega:* HOJE (${t.dueDate})\n` +
+      `⚡ *Prioridade:* ${priorityEmoji} ${t.priority.toUpperCase()}\n` +
+      `👤 *Responsável:* ${t.assignedTo || 'Equipe Raon'}\n` +
+      (t.description ? `📝 *Briefing:* ${t.description}\n` : '') +
+      `\n🌐 _Acesse o RAON PAINEL para atualizar ou concluir a entrega._`
+    );
+  };
+
+  const generateDigestMessage = () => {
+    const todayFormatted = new Date().toLocaleDateString('pt-BR');
+    let msg = `🚨 *AGENDA DE TAREFAS DE HOJE (${todayFormatted}) — AGÊNCIA RAON* 🚀\n\n`;
+    if (tasksDueToday.length === 0) {
+      msg += `✅ Nenhuma tarefa com vencimento para hoje! Todas as entregas estão em dia.\n\n`;
+    } else {
+      msg += `Você tem *${tasksDueToday.length} tarefa(s)* com vencimento para *HOJE*:\n\n`;
+      tasksDueToday.forEach((t, i) => {
+        const pEmoji = t.priority === 'urgente' ? '🔴' : t.priority === 'alta' ? '🟠' : '🔹';
+        msg += `${i + 1}. ${pEmoji} *${t.title}*\n   🏢 Cliente: ${t.clientName || 'Geral'}\n   🛠️ Serviço: ${t.serviceName || 'Geral'}\n   👤 Responsável: ${t.assignedTo}\n\n`;
+      });
+    }
+    if (tasksOverdue.length > 0) {
+      msg += `⚠️ *Atenção:* Há também *${tasksOverdue.length} tarefa(s) atrasada(s)* pendentes!\n\n`;
+    }
+    msg += `🌐 _Acesse o RAON PAINEL para gerenciar e acompanhar a equipe._`;
+    return msg;
+  };
+
+  const handleSendWhatsApp = (message: string) => {
+    const clean = notificationPhone.replace(/\D/g, '');
+    const formatted = clean.startsWith('55')
+      ? clean
+      : clean.length >= 10
+      ? `55${clean}`
+      : clean;
+    const url = `https://api.whatsapp.com/send?phone=${formatted}&text=${encodeURIComponent(message)}`;
+    window.open(url, '_blank');
+  };
+
+  const handleOpenWhatsAppDigest = () => {
+    setIsDigestMode(true);
+    setNotificationTargetTask(null);
+    setCopied(false);
+    setNotificationModalOpen(true);
+  };
+
+  const handleOpenWhatsAppTaskAlert = (task: Task) => {
+    setIsDigestMode(false);
+    setNotificationTargetTask(task);
+    setCopied(false);
+    setNotificationModalOpen(true);
+  };
+
+  const handleSavePhone = (newPhone: string) => {
+    setNotificationPhone(newPhone);
+    localStorage.setItem('raon_admin_notification_phone', newPhone);
+    setIsPhoneModalOpen(false);
+    alert('✓ Número de WhatsApp para notificações salvo com sucesso!');
+  };
+
+  const handleEnableBrowserNotifications = async () => {
+    if (!('Notification' in window)) {
+      alert('Seu navegador atual não suporta notificações nativas push. Você pode utilizar o botão de envio para o seu WhatsApp!');
+      return;
+    }
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm === 'granted') {
+        if (tasksDueToday.length > 0) {
+          new Notification('Agência Raon — Tarefas no Vencimento!', {
+            body: `Você possui ${tasksDueToday.length} tarefa(s) com vencimento para HOJE!`,
+            icon: '/favicon.ico',
+          });
+        } else {
+          new Notification('Agência Raon — Alertas Ativados!', {
+            body: 'Você receberá avisos no celular/navegador quando houver tarefas no dia do vencimento.',
+            icon: '/favicon.ico',
+          });
+        }
+        alert('✓ Notificações no celular/navegador ativadas com sucesso!');
+      } else {
+        alert('Permissão de notificações não foi concedida nas configurações do dispositivo.');
+      }
+    } catch (e: any) {
+      console.error(e);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -271,6 +396,66 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
           >
             <Plus className="w-4 h-4" />
             <span>+ Nova Tarefa</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ==================== BANNER DE NOTIFICAÇÕES NO CELULAR / WHATSAPP ==================== */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-[#102B59] to-[#0B407A] text-white shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border border-blue-400/20">
+        <div className="flex items-start sm:items-center gap-3.5">
+          <div className="p-3 rounded-2xl bg-[#25D366]/20 text-[#25D366] shrink-0 border border-[#25D366]/30">
+            <BellRing className="w-6 h-6 animate-pulse" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="font-bold text-sm sm:text-base text-white">
+                Notificações de Vencimento no Celular & WhatsApp
+              </h3>
+              {tasksDueToday.length > 0 && (
+                <span className="px-2.5 py-0.5 rounded-full bg-amber-500 text-white text-[11px] font-black animate-pulse">
+                  {tasksDueToday.length} {tasksDueToday.length === 1 ? 'vence hoje' : 'vencem hoje'}
+                </span>
+              )}
+              {tasksOverdue.length > 0 && (
+                <span className="px-2.5 py-0.5 rounded-full bg-red-500 text-white text-[11px] font-black">
+                  {tasksOverdue.length} {tasksOverdue.length === 1 ? 'atrasada' : 'atrasadas'}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-blue-100/80 mt-1 max-w-2xl leading-relaxed">
+              Receba os alertas de tarefas no dia do vencimento direto no seu celular. Você pode disparar o resumo diário com 1 clique para o WhatsApp pessoal <strong>{notificationPhone}</strong> ou ativar notificações push.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap self-end md:self-auto w-full md:w-auto justify-end">
+          <button
+            onClick={handleOpenWhatsAppDigest}
+            className="px-3.5 py-2 bg-[#25D366] hover:bg-[#1EBE5D] text-white font-bold text-xs rounded-xl shadow-md transition-all hover:scale-105 flex items-center gap-1.5"
+            title="Disparar resumo das tarefas de hoje para o WhatsApp"
+          >
+            <MessageCircle className="w-4 h-4" />
+            <span>Enviar Resumo para Meu WhatsApp</span>
+          </button>
+
+          <button
+            onClick={handleEnableBrowserNotifications}
+            className="px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/20 transition-all flex items-center gap-1.5"
+            title="Ativar alertas na tela do celular / navegador"
+          >
+            <Bell className="w-4 h-4 text-amber-300" />
+            <span>Ativar Alertas no Celular</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setTempPhone(notificationPhone);
+              setIsPhoneModalOpen(true);
+            }}
+            className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-xl border border-white/20 transition-all"
+            title="Alterar número de celular para notificações"
+          >
+            <Smartphone className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -409,12 +594,12 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
                             )}
                           </div>
 
-                          {/* Fast Move select */}
-                          <div onClick={(e) => e.stopPropagation()} className="pt-1">
+                          {/* Fast Move select & WhatsApp reminder button */}
+                          <div onClick={(e) => e.stopPropagation()} className="pt-1 flex items-center gap-1.5">
                             <select
                               value={task.status}
                               onChange={(e) => handleUpdateStatus(task, e.target.value as TaskStatus)}
-                              className="w-full text-[10px] font-bold p-1 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300"
+                              className="flex-1 text-[10px] font-bold p-1 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300"
                             >
                               <option value="a_fazer">Mover: A Fazer</option>
                               <option value="em_andamento">Mover: Em Andamento</option>
@@ -423,6 +608,14 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
                               <option value="concluida">Mover: Concluída</option>
                               <option value="cancelada">Mover: Cancelada</option>
                             </select>
+
+                            <button
+                              onClick={() => handleOpenWhatsAppTaskAlert(task)}
+                              className="p-1 rounded-lg bg-[#25D366]/10 hover:bg-[#25D366] hover:text-white text-[#25D366] transition-colors shrink-0"
+                              title="Enviar lembrete desta tarefa para o WhatsApp"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
                       );
@@ -488,16 +681,26 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
                         </span>
                       </td>
                       <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          onClick={() => handleUpdateStatus(t, t.status === 'concluida' ? 'em_andamento' : 'concluida')}
-                          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
-                            t.status === 'concluida'
-                              ? 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
-                              : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                          }`}
-                        >
-                          {t.status === 'concluida' ? 'Reabrir' : 'Concluir'}
-                        </button>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => handleOpenWhatsAppTaskAlert(t)}
+                            className="p-1.5 rounded-lg bg-[#25D366]/10 hover:bg-[#25D366] hover:text-white text-[#25D366] transition-colors"
+                            title="Enviar lembrete desta tarefa para o WhatsApp"
+                          >
+                            <MessageCircle className="w-3.5 h-3.5" />
+                          </button>
+
+                          <button
+                            onClick={() => handleUpdateStatus(t, t.status === 'concluida' ? 'em_andamento' : 'concluida')}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
+                              t.status === 'concluida'
+                                ? 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+                                : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                            }`}
+                          >
+                            {t.status === 'concluida' ? 'Reabrir' : 'Concluir'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -782,6 +985,177 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL: DISPARO DE NOTIFICAÇÃO NO WHATSAPP ==================== */}
+      {notificationModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+          <div className="relative w-full max-w-lg bg-white dark:bg-[#10192A] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="px-6 py-4 bg-[#25D366] text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <MessageCircle className="w-5 h-5" />
+                <h3 className="font-bold text-sm">
+                  {isDigestMode
+                    ? 'Resumo de Tarefas de Hoje no WhatsApp'
+                    : `Lembrete de Vencimento: ${notificationTargetTask?.title}`}
+                </h3>
+              </div>
+              <button
+                onClick={() => setNotificationModalOpen(false)}
+                className="p-1 text-emerald-100 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-4 text-xs">
+              {/* Recipient Phone info */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl flex items-center justify-between gap-2">
+                <div>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+                    Número de Destino (Seu Celular / WhatsApp)
+                  </span>
+                  <span className="text-sm font-black text-slate-800 dark:text-white">
+                    {notificationPhone}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTempPhone(notificationPhone);
+                    setIsPhoneModalOpen(true);
+                  }}
+                  className="px-2.5 py-1 text-[11px] font-bold text-[#0878D9] hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg transition-colors"
+                >
+                  Alterar Número
+                </button>
+              </div>
+
+              {/* Message preview */}
+              <div>
+                <label className="font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                  Mensagem Formatada para Envio
+                </label>
+                <textarea
+                  readOnly
+                  rows={9}
+                  value={
+                    isDigestMode
+                      ? generateDigestMessage()
+                      : notificationTargetTask
+                      ? generateSingleTaskMessage(notificationTargetTask)
+                      : ''
+                  }
+                  className="w-full p-3 font-mono text-[11px] bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl leading-relaxed text-slate-700 dark:text-slate-300"
+                />
+              </div>
+
+              <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/40 text-blue-900 dark:text-blue-200 text-[11px]">
+                💡 <strong>Como funciona:</strong> Ao clicar em <em>"Abrir no WhatsApp"</em>, o aplicativo do WhatsApp será aberto no seu celular ou computador com o número <strong>{notificationPhone}</strong> e o texto prontos para envio.
+              </div>
+
+              <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const text = isDigestMode
+                      ? generateDigestMessage()
+                      : notificationTargetTask
+                      ? generateSingleTaskMessage(notificationTargetTask)
+                      : '';
+                    navigator.clipboard.writeText(text);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }}
+                  className="px-3.5 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl flex items-center gap-1.5 hover:bg-slate-200 transition-colors"
+                >
+                  {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copied ? 'Copiado!' : 'Copiar Texto'}</span>
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNotificationModalOpen(false)}
+                    className="px-3 py-2 text-slate-500 font-bold text-xs"
+                  >
+                    Fechar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const text = isDigestMode
+                        ? generateDigestMessage()
+                        : notificationTargetTask
+                        ? generateSingleTaskMessage(notificationTargetTask)
+                        : '';
+                      handleSendWhatsApp(text);
+                    }}
+                    className="px-4 py-2 bg-[#25D366] hover:bg-[#1EBE5D] text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 transition-all hover:scale-105"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>Abrir no WhatsApp</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL: CONFIGURAR NÚMERO DE NOTIFICAÇÃO ==================== */}
+      {isPhoneModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+          <div className="relative w-full max-w-sm bg-white dark:bg-[#10192A] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+            <div className="px-6 py-4 bg-[#102B59] text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Smartphone className="w-4 h-4 text-[#25D366]" />
+                <h3 className="font-bold text-sm">Seu Celular para Notificações</h3>
+              </div>
+              <button
+                onClick={() => setIsPhoneModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs">
+              <div>
+                <label className="font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                  Número com DDD (WhatsApp)
+                </label>
+                <input
+                  type="text"
+                  value={tempPhone}
+                  onChange={(e) => setTempPhone(e.target.value)}
+                  placeholder="Ex: (75) 98864-4742"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-sm text-[#25D366]"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Este número será usado para receber resumos das tarefas e alertas de vencimento com 1 clique.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsPhoneModalOpen(false)}
+                  className="px-3 py-2 text-slate-500 font-bold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSavePhone(tempPhone)}
+                  className="px-4 py-2 bg-[#0878D9] hover:bg-[#0768BD] text-white font-bold rounded-xl shadow-xs"
+                >
+                  Salvar Celular
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

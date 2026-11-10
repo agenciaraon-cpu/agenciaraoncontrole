@@ -231,6 +231,7 @@ const AppContent: React.FC = () => {
                   expenses={expenses}
                   sales={sales}
                   productsServices={productsServices}
+                  tasks={tasks}
                   onNavigate={setCurrentTab}
                   onRefresh={loadAllData}
                 />

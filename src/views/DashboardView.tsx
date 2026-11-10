@@ -23,6 +23,9 @@ import {
   Briefcase,
   PieChart as PieIcon,
   BarChart2,
+  CheckSquare,
+  MessageCircle,
+  Bell,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import {
@@ -40,7 +43,7 @@ import {
   AreaChart,
   Area,
 } from 'recharts';
-import { Client, Contract, Receivable, Expense, ActiveTab, Sale, ProductService } from '../types';
+import { Client, Contract, Receivable, Expense, ActiveTab, Sale, ProductService, Task } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { registerReceivablePayment } from '../services/db';
 
@@ -51,6 +54,7 @@ interface DashboardViewProps {
   expenses: Expense[];
   sales?: Sale[];
   productsServices?: ProductService[];
+  tasks?: Task[];
   onNavigate: (tab: ActiveTab) => void;
   onOpenWhatsAppForClient?: (client: Client) => void;
   onRefresh?: () => void;
@@ -63,6 +67,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   expenses,
   sales = [],
   productsServices = [],
+  tasks = [],
   onNavigate,
   onOpenWhatsAppForClient,
   onRefresh,
@@ -93,6 +98,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       })
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   }, [receivables, todayStr]);
+
+  // Tarefas com vencimento para hoje
+  const tasksDueToday = useMemo(() => {
+    return (tasks || []).filter(
+      (t) => t.dueDate === todayStr && t.status !== 'concluida' && t.status !== 'cancelada'
+    );
+  }, [tasks, todayStr]);
 
   // Handler to confirm receipt directly from Dashboard
   const handleConfirmReceipt = async (r: Receivable) => {
@@ -481,6 +493,37 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Ambient Glow */}
         <div className="absolute -right-10 -bottom-10 w-72 h-72 bg-[#FF7817]/25 rounded-full blur-3xl pointer-events-none" />
       </div>
+
+      {/* ==================== AVISO DE TAREFAS NO VENCIMENTO HOJE ==================== */}
+      {tasksDueToday.length > 0 && (
+        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-[#102B59] to-[#0878D9] text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-3 border border-blue-400/30">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-amber-400/20 text-amber-300 shrink-0">
+              <CheckSquare className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="font-bold text-sm text-white">
+                  Lembrete Operacional: {tasksDueToday.length} {tasksDueToday.length === 1 ? 'tarefa vence' : 'tarefas vencem'} hoje!
+                </h4>
+                <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-900 text-[10px] font-black uppercase">
+                  Atenção
+                </span>
+              </div>
+              <p className="text-xs text-blue-100/80 mt-0.5">
+                Você pode disparar alertas com 1 clique direto no seu WhatsApp ou acompanhar as entregas da equipe.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => onNavigate('tasks')}
+            className="px-4 py-2 bg-[#25D366] hover:bg-[#1EBE5D] text-white font-bold text-xs rounded-xl shadow-xs transition-all hover:scale-105 flex items-center gap-1.5 shrink-0 self-start sm:self-auto"
+          >
+            <MessageCircle className="w-4 h-4" />
+            <span>Ver Tarefas & Notificar no WhatsApp</span>
+          </button>
+        </div>
+      )}
 
       {/* ==================== AVISO & CONFIRMAÇÃO DE COBRANÇAS VENCIDAS (DAR BAIXA) ==================== */}
       <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#10192A] border border-red-200 dark:border-red-900/40 shadow-sm">
