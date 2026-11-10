@@ -13,6 +13,7 @@ export const Logo: React.FC<LogoProps> = ({
   collapsed = false,
   customLogoUrl,
 }) => {
+  const [imgSrc, setImgSrc] = useState<string>(customLogoUrl || '/logo.png');
   const [imgError, setImgError] = useState(false);
 
   const sizeClasses = {
@@ -29,16 +30,22 @@ export const Logo: React.FC<LogoProps> = ({
 
   const currentIconSize = iconSizes[size];
 
-  // Use the official uploaded Agência Raon logo as default
-  const effectiveSrc = !imgError ? (customLogoUrl || '/assets/aistudio/raon_1c84cc29.png') : null;
+  const handleImageError = () => {
+    if (imgSrc === '/logo.png') {
+      // Try alternate asset path
+      setImgSrc('/assets/aistudio/raon_1c84cc29.png');
+    } else {
+      setImgError(true);
+    }
+  };
 
   return (
     <div className={`flex items-center gap-2 select-none ${className}`}>
-      {effectiveSrc ? (
+      {!imgError ? (
         <img
-          src={effectiveSrc}
+          src={imgSrc}
           alt="Agência Raon"
-          onError={() => setImgError(true)}
+          onError={handleImageError}
           className={`${sizeClasses[size]} w-auto max-w-[190px] object-contain transition-all duration-200`}
         />
       ) : (

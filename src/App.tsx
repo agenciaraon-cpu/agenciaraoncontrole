@@ -144,10 +144,13 @@ const AppContent: React.FC = () => {
 
   // Register service worker for PWA installation
   useEffect(() => {
-    if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
+    if ('serviceWorker' in navigator && import.meta.env.PROD) {
       navigator.serviceWorker
         .register('/sw.js')
-        .then(() => console.log('RAON PAINEL: PWA Service Worker registrado'))
+        .then((reg) => {
+          console.log('RAON PAINEL: PWA Service Worker registrado');
+          reg.update();
+        })
         .catch((err) => console.log('Service Worker bypass no dev:', err));
     }
   }, []);

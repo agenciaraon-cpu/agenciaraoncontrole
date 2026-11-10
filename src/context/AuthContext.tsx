@@ -101,7 +101,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    // Safety timeout: ensure loading state resolves even if auth provider takes too long
+    const timeoutId = setTimeout(() => {
+      setLoading((prev) => {
+        if (prev) {
+          console.warn('RAON PAINEL: Auth resolution fallback acionado.');
+          return false;
+        }
+        return false;
+      });
+    }, 2500);
+
+    return () => {
+      clearTimeout(timeoutId);
+      unsubscribe();
+    };
   }, [isDemoActive]);
 
   const loginWithGoogle = async () => {
