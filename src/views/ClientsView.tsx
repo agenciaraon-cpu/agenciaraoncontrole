@@ -36,6 +36,7 @@ import {
   reactivateClient,
   createContract,
   registerReceivablePayment,
+  ensureMonthlyReceivablesForAllClients,
 } from '../services/db';
 import { useAuth } from '../context/AuthContext';
 import { WhatsAppModal, WhatsAppTemplateKey } from '../components/common/WhatsAppModal';
@@ -266,6 +267,15 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
           );
         } catch (contractErr) {
           console.warn('Aviso na criação de contrato automático:', contractErr);
+        }
+      }
+
+      // Garante geração imediata da cobrança do mês ativo (11/2026) e marcação de vencido se aplicável
+      if (Number(formData.monthlyFee) > 0) {
+        try {
+          await ensureMonthlyReceivablesForAllClients();
+        } catch (recErr) {
+          console.warn('Aviso sincronizando cobrança imediata:', recErr);
         }
       }
 
@@ -1125,6 +1135,11 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
         },
         user?.email || 'somosraon@gmail.com'
       );
+      try {
+        await ensureMonthlyReceivablesForAllClients();
+      } catch (recErr) {
+        console.warn('Aviso sincronizando cobranças pós edição:', recErr);
+      }
       onRefresh();
       alert('✓ Dados cadastrais, vencimento e configurações do cliente atualizados com sucesso!');
     } catch (err: any) {

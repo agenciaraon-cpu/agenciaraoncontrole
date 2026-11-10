@@ -80,12 +80,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0);
   };
 
-  // Pending receivables that have reached or passed their due date (counting strictly from November 2026 onwards)
-  const pendingDueReceivables = useMemo(() => {
+  // Mostra APENAS as cobranças vencidas aguardando confirmação / dar baixa (contagem a partir de Novembro/2026)
+  const overdueReceivables = useMemo(() => {
     return receivables
-      .filter((r) => r.status !== 'recebido' && (!r.dueDate || r.dueDate >= '2026-11-01'))
+      .filter((r) => {
+        if (r.status === 'recebido' || r.status === 'cancelado') return false;
+        // Filtro estrito solicitado: apenas os vencidos (status 'vencido' OU data de vencimento <= hoje)
+        const isPastOrToday = r.dueDate ? r.dueDate <= todayStr : false;
+        const isOverdueStatus = r.status === 'vencido';
+        const isNovemberOnwards = !r.dueDate || r.dueDate >= '2026-11-01';
+        return (isPastOrToday || isOverdueStatus) && isNovemberOnwards;
+      })
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-  }, [receivables]);
+  }, [receivables, todayStr]);
 
   // Handler to confirm receipt directly from Dashboard
   const handleConfirmReceipt = async (r: Receivable) => {
@@ -475,24 +482,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="absolute -right-10 -bottom-10 w-72 h-72 bg-[#FF7817]/25 rounded-full blur-3xl pointer-events-none" />
       </div>
 
-      {/* ==================== AVISO & CONFIRMAÇÃO DE RECEBIMENTOS NO VENCIMENTO ==================== */}
-      <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#10192A] border border-blue-200 dark:border-blue-900/50 shadow-sm">
+      {/* ==================== AVISO & CONFIRMAÇÃO DE COBRANÇAS VENCIDAS (DAR BAIXA) ==================== */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#10192A] border border-red-200 dark:border-red-900/40 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-[#0878D9]/10 text-[#0878D9]">
+            <div className="p-2 rounded-xl bg-red-500/10 text-red-600 dark:text-red-400">
               <Clock className="w-5 h-5" />
             </div>
             <div>
               <h3 className="font-bold text-sm text-slate-800 dark:text-white flex items-center gap-2">
-                Cobranças & Vendas no Vencimento — Aguardando Confirmação
-                {pendingDueReceivables.length > 0 && (
-                  <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-black">
-                    {pendingDueReceivables.length} para confirmar
+                Cobranças Vencidas — Aguardando Confirmação (Dar Baixa)
+                {overdueReceivables.length > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-red-500 text-white text-[10px] font-black animate-pulse">
+                    {overdueReceivables.length} {overdueReceivables.length === 1 ? 'vencido para dar baixa' : 'vencidos para dar baixa'}
                   </span>
                 )}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                O valor só entra no <strong>Total Recebido no Mês</strong> após você confirmar o recebimento abaixo.
+                Mostrando apenas contas vencidas a partir deste mês (Novembro/2026). O valor só entra no <strong>Total Recebido no Mês</strong> após você confirmar o recebimento.
               </p>
             </div>
           </div>
@@ -504,16 +511,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </button>
         </div>
 
-        {pendingDueReceivables.length === 0 ? (
+        {overdueReceivables.length === 0 ? (
           <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/30 text-emerald-800 dark:text-emerald-300 flex items-center gap-2 text-xs font-semibold">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-            <span>Excelente! Não há cobranças pendentes aguardando confirmação no momento. Todos os recebimentos confirmados já constam nas métricas acima.</span>
+            <span>Excelente! Não há cobranças vencidas pendentes no momento. Todas as empresas cadastradas estão com pagamentos em dia ou já confirmados.</span>
           </div>
         ) : (
-          <div className="space-y-2">
-            {pendingDueReceivables.slice(0, 4).map((r) => {
-              const isOverdue = r.dueDate < todayStr;
-              const isDueToday = r.dueDate === todayStr;
+          <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1">
+            {overdueReceivables.map((r) => {
               const sourceLabel =
                 r.revenueSource === 'produto'
                   ? 'Produto'
@@ -524,18 +529,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               return (
                 <div
                   key={r.id}
-                  className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-[#0878D9] transition-all"
+                  className="p-3 rounded-xl bg-red-50/40 dark:bg-slate-900/60 border border-red-200 dark:border-red-900/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-red-400 transition-all"
                 >
                   <div className="flex items-start gap-3">
-                    <div
-                      className={`p-2 rounded-lg shrink-0 mt-0.5 ${
-                        isOverdue
-                          ? 'bg-red-500/10 text-red-600'
-                          : isDueToday
-                          ? 'bg-amber-500/10 text-amber-600'
-                          : 'bg-blue-500/10 text-[#0878D9]'
-                      }`}
-                    >
+                    <div className="p-2 rounded-lg shrink-0 mt-0.5 bg-red-500/10 text-red-600">
                       <DollarSign className="w-4 h-4" />
                     </div>
                     <div>
@@ -546,26 +543,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
                           {sourceLabel}
                         </span>
-                        <span
-                          className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
-                            isOverdue
-                              ? 'bg-red-500/10 text-red-600'
-                              : isDueToday
-                              ? 'bg-amber-500/10 text-amber-600'
-                              : 'bg-blue-500/10 text-[#0878D9]'
-                          }`}
-                        >
-                          {isOverdue ? 'Vencido' : isDueToday ? 'Vence Hoje' : 'No Vencimento'}
+                        <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 border border-red-500/20">
+                          Vencido ({r.dueDate})
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-500 mt-0.5">
-                        {r.description} • Competência: <strong>{r.competence}</strong> • Vencimento: <strong>{r.dueDate}</strong>
+                        {r.description} • Competência: <strong>{r.competence}</strong> • Vencimento original: <strong>{r.dueDate}</strong>
                       </p>
                     </div>
                   </div>
 
                   <div className="flex items-center justify-between sm:justify-end gap-3 self-end sm:self-auto w-full sm:w-auto">
-                    <span className="text-sm font-black text-slate-800 dark:text-white">
+                    <span className="text-sm font-black text-red-600 dark:text-red-400">
                       {formatCurrency(Number(r.originalAmount) - (Number(r.paidAmount) || 0))}
                     </span>
                     <button

@@ -503,8 +503,16 @@ export async function getReceivables(): Promise<Receivable[]> {
   try {
     const snap = await getDocs(collection(db, 'receivables'));
     const list: Receivable[] = [];
+    const todayStr = new Date().toISOString().split('T')[0];
+
     snap.forEach((d) => {
-      list.push({ ...d.data(), id: d.id } as Receivable);
+      const data = d.data() as Receivable;
+      // Auto-mark overdue status if due date is past or today and still not paid
+      let currentStatus = data.status;
+      if (currentStatus === 'pendente' && data.dueDate && data.dueDate <= todayStr) {
+        currentStatus = 'vencido';
+      }
+      list.push({ ...data, id: d.id, status: currentStatus } as Receivable);
     });
     return list.sort((a, b) => b.dueDate.localeCompare(a.dueDate));
   } catch (err) {
@@ -638,6 +646,86 @@ export async function purgeDebtsBeforeNovember(): Promise<void> {
     }
   } catch (err) {
     console.warn('Sincronização de cobranças a partir de Novembro:', err);
+  }
+}
+
+// Automatic synchronizer: guarantees that EVERY registered active client (e.g., Inventário Visão)
+// has its recurring monthly receivable created for the active month (11/2026), and marks it 'vencido'
+// if the due date has already passed or is today.
+export async function ensureMonthlyReceivablesForAllClients(): Promise<void> {
+  try {
+    const clientsSnap = await getDocs(collection(db, 'clients'));
+    const recsSnap = await getDocs(collection(db, 'receivables'));
+
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonthNum = String(now.getMonth() + 1).padStart(2, '0'); // '11'
+    const competence = `${currentMonthNum}/${currentYear}`; // '11/2026'
+    const todayStr = now.toISOString().split('T')[0];
+
+    const existingRecs = recsSnap.docs.map((d) => ({ ...d.data(), id: d.id } as Receivable));
+
+    for (const cDoc of clientsSnap.docs) {
+      const client = { ...cDoc.data(), id: cDoc.id } as Client;
+
+      // Skip canceled or permanently inactive clients
+      if (client.status === 'cancelado' || client.status === 'inativo') continue;
+
+      const fee = Number(client.monthlyFee) || 0;
+      if (fee <= 0) continue;
+
+      const dueDay = Number(client.dueDay) || 10;
+      const daysInMonth = new Date(currentYear, now.getMonth() + 1, 0).getDate();
+      const actualDueDay = Math.min(dueDay, daysInMonth);
+      const dueDate = `${currentYear}-${currentMonthNum}-${String(actualDueDay).padStart(2, '0')}`;
+      const isPastOrToday = dueDate <= todayStr;
+
+      // Check if client already has a receivable for current competence (by clientId OR companyName)
+      const existing = existingRecs.find(
+        (r) =>
+          (r.clientId === client.id ||
+            (r.clientName && client.companyName && r.clientName.trim().toLowerCase() === client.companyName.trim().toLowerCase())) &&
+          r.competence === competence &&
+          r.status !== 'cancelado'
+      );
+
+      if (!existing) {
+        const status = isPastOrToday ? 'vencido' : 'pendente';
+        await addDoc(collection(db, 'receivables'), {
+          clientId: client.id,
+          clientName: client.companyName,
+          contractId: '',
+          description: `Mensalidade ${competence} — ${client.companyName}`,
+          dueDate,
+          competence,
+          originalAmount: fee,
+          discountAmount: 0,
+          paidAmount: 0,
+          status,
+          paymentMethod: 'PIX',
+          revenueSource: 'agencia',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+        console.log(`Mensalidade gerada automaticamente para ${client.companyName} (${dueDate}, status: ${status})`);
+      } else {
+        // If already exists but marked pendente when it's already due or past due, update to vencido
+        if (existing.status === 'pendente' && (existing.dueDate <= todayStr || isPastOrToday)) {
+          try {
+            await updateDoc(doc(db, 'receivables', existing.id), {
+              status: 'vencido',
+              clientId: client.id,
+              clientName: client.companyName,
+              updatedAt: new Date().toISOString(),
+            });
+          } catch (updateErr) {
+            console.warn('Aviso atualizando status para vencido:', updateErr);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Aviso em ensureMonthlyReceivablesForAllClients:', err);
   }
 }
 
