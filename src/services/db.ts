@@ -134,10 +134,73 @@ export async function createClient(client: Omit<Client, 'id'>, userEmail: string
 export async function updateClient(id: string, updates: Partial<Client>, userEmail: string): Promise<void> {
   try {
     const docRef = doc(db, 'clients', id);
-    await updateDoc(docRef, {
+    
+    // Clean any undefined keys to prevent Firestore crashes
+    const cleanUpdates: Record<string, any> = {
       ...updates,
       updatedAt: new Date().toISOString(),
+    };
+    Object.keys(cleanUpdates).forEach((k) => {
+      if (cleanUpdates[k] === undefined) delete cleanUpdates[k];
     });
+
+    await updateDoc(docRef, cleanUpdates);
+
+    // If client dueDay, monthlyFee, companyName, or planName changed, synchronize associated active contracts & pending receivables
+    if (
+      updates.dueDay !== undefined ||
+      updates.monthlyFee !== undefined ||
+      updates.companyName !== undefined ||
+      updates.planName !== undefined
+    ) {
+      try {
+        // 1. Sync matching contracts
+        const contractsSnap = await getDocs(
+          query(collection(db, 'contracts'), where('clientId', '==', id))
+        );
+        for (const cDoc of contractsSnap.docs) {
+          const cUpdates: Record<string, any> = { updatedAt: new Date().toISOString() };
+          if (updates.companyName) cUpdates.clientName = updates.companyName;
+          if (updates.monthlyFee !== undefined) cUpdates.monthlyFee = Number(updates.monthlyFee);
+          if (updates.dueDay !== undefined) cUpdates.dueDay = Number(updates.dueDay);
+          if (updates.planName) cUpdates.planName = updates.planName;
+          await updateDoc(cDoc.ref, cUpdates);
+        }
+
+        // 2. Sync pending receivables (not yet paid)
+        const recSnap = await getDocs(
+          query(collection(db, 'receivables'), where('clientId', '==', id))
+        );
+        const todayStr = new Date().toISOString().split('T')[0];
+
+        for (const rDoc of recSnap.docs) {
+          const r = rDoc.data() as Receivable;
+          if (r.status !== 'recebido') {
+            const rUpdates: Record<string, any> = { updatedAt: new Date().toISOString() };
+            if (updates.companyName) rUpdates.clientName = updates.companyName;
+            if (updates.monthlyFee !== undefined && (!r.paidAmount || r.paidAmount === 0)) {
+              rUpdates.originalAmount = Number(updates.monthlyFee);
+            }
+            if (updates.dueDay !== undefined && r.dueDate) {
+              const parts = r.dueDate.split('-');
+              if (parts.length === 3) {
+                const year = parseInt(parts[0], 10);
+                const month = parseInt(parts[1], 10);
+                const daysInMonth = new Date(year, month, 0).getDate();
+                const newDay = Math.min(Number(updates.dueDay), daysInMonth);
+                const newDueDate = `${parts[0]}-${parts[1]}-${String(newDay).padStart(2, '0')}`;
+                rUpdates.dueDate = newDueDate;
+                rUpdates.status = newDueDate < todayStr ? 'vencido' : 'pendente';
+              }
+            }
+            await updateDoc(rDoc.ref, rUpdates);
+          }
+        }
+      } catch (syncErr) {
+        console.warn('Aviso na sincronização de contratos/cobranças do cliente:', syncErr);
+      }
+    }
+
     await logAudit(userEmail, 'user', 'client', id, 'update', `Atualização cadastral do cliente ID ${id}`);
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, `clients/${id}`);
@@ -357,7 +420,7 @@ export async function updateContract(id: string, updates: Partial<Contract>, use
   }
 }
 
-// Helper to generate monthly invoices for a contract
+// Helper to generate monthly invoices for a contract starting strictly from November 2026 (month 11)
 export async function generateReceivablesForContract(
   contractId: string,
   clientId: string,
@@ -368,10 +431,34 @@ export async function generateReceivablesForContract(
   monthsCount: number = 6
 ) {
   const existingReceivables = await getReceivables();
-  const baseDate = new Date(startDateStr || new Date());
+
+  // REGRA OBRIGATÓRIA: Contar cobranças estritamente a partir de Novembro (Mês 11 de 2026)
+  // Não gerar débitos retroativos desde a data de entrada do cliente
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  // 10 is November in 0-indexed JS Month (mês 11)
+  const novemberStart = new Date(currentYear, 10, 1);
+
+  let baseDate = novemberStart;
+  if (startDateStr) {
+    const candidate = new Date(startDateStr);
+    if (!isNaN(candidate.getTime())) {
+      const candidateMonthStart = new Date(candidate.getFullYear(), candidate.getMonth(), 1);
+      // Se a data de entrada for posterior a Novembro/2026, inicia a partir dela; caso contrário, inicia estritamente em Novembro
+      if (candidateMonthStart > novemberStart) {
+        baseDate = candidateMonthStart;
+      }
+    }
+  }
 
   for (let i = 0; i < monthsCount; i++) {
     const targetMonth = new Date(baseDate.getFullYear(), baseDate.getMonth() + i, 1);
+
+    // Garantia estrita: nunca gerar cobrança para meses anteriores a Novembro/2026
+    if (targetMonth < novemberStart) {
+      continue;
+    }
+
     const monthNum = String(targetMonth.getMonth() + 1).padStart(2, '0');
     const yearNum = targetMonth.getFullYear();
     const competence = `${monthNum}/${yearNum}`;
@@ -403,6 +490,7 @@ export async function generateReceivablesForContract(
         paidAmount: 0,
         status: initialStatus,
         paymentMethod: 'PIX',
+        revenueSource: 'agencia',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
@@ -469,33 +557,87 @@ export async function registerReceivablePayment(
   try {
     const docRef = doc(db, 'receivables', id);
     const snap = await getDoc(docRef);
-    if (!snap.exists()) throw new Error('Cobrança não encontrada');
+    if (!snap.exists()) throw new Error('Cobrança não encontrada no banco de dados');
     const current = snap.data() as Receivable;
 
-    const totalPaid = (current.paidAmount || 0) + paidAmount;
-    const finalOriginal = current.originalAmount - (discountAmount || 0);
+    const numericPaid = Number(paidAmount) || 0;
+    const numericDiscount = Number(discountAmount) || 0;
+    const totalPaid = (Number(current.paidAmount) || 0) + numericPaid;
+    const finalOriginal = Number(current.originalAmount) - numericDiscount;
     const newStatus = totalPaid >= finalOriginal ? 'recebido' : totalPaid > 0 ? 'parcial' : 'pendente';
 
-    await updateDoc(docRef, {
+    const safePaymentDate = paymentDate || new Date().toISOString().split('T')[0];
+    const safePaymentMethod = paymentMethod || current.paymentMethod || 'PIX';
+    const safeNotes = notes !== undefined ? notes : (current.notes || '');
+
+    const updates: Record<string, any> = {
       paidAmount: totalPaid,
-      discountAmount: discountAmount || 0,
-      paymentMethod,
-      paymentDate: paymentDate || new Date().toISOString().split('T')[0],
+      discountAmount: numericDiscount,
+      paymentMethod: safePaymentMethod,
+      paymentDate: safePaymentDate,
       status: newStatus,
-      notes: notes || current.notes,
+      notes: safeNotes,
       updatedAt: new Date().toISOString(),
+    };
+
+    // Strip any potential undefined to prevent Firestore "Unsupported field value: undefined"
+    Object.keys(updates).forEach((k) => {
+      if (updates[k] === undefined) delete updates[k];
     });
 
-    await logAudit(
-      userEmail,
-      'user',
-      'receivable',
-      id,
-      'payment_registered',
-      `Baixa de pagamento no valor de R$ ${paidAmount} (${newStatus}) via ${paymentMethod}`
-    );
+    await updateDoc(docRef, updates);
+
+    // If receivable is linked to a standalone sale, also sync the sale safely
+    if (current.saleId) {
+      try {
+        const saleRef = doc(db, 'sales', current.saleId);
+        const saleSnap = await getDoc(saleRef);
+        if (saleSnap.exists()) {
+          const sale = saleSnap.data() as Sale;
+          const isFull = totalPaid >= Number(sale.totalAmount);
+          await updateDoc(saleRef, {
+            financialStatus: isFull ? 'pago' : 'parcial',
+            paidAmount: totalPaid,
+            paymentDate: safePaymentDate,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch (saleErr) {
+        console.warn('Aviso ao sincronizar venda vinculada:', saleErr);
+      }
+    }
+
+    try {
+      await logAudit(
+        userEmail || 'agenciaraon@gmail.com',
+        'user',
+        'receivable',
+        id,
+        'payment_registered',
+        `Baixa de pagamento no valor de R$ ${numericPaid} (${newStatus}) via ${safePaymentMethod}`
+      );
+    } catch (auditErr) {
+      console.warn('Aviso em auditoria de baixa:', auditErr);
+    }
   } catch (err) {
+    console.error('Erro em registerReceivablePayment:', err);
     handleFirestoreError(err, OperationType.UPDATE, `receivables/${id}`);
+  }
+}
+
+// Helper to remove any un-paid debts generated prior to November 2026 (mês 11)
+export async function purgeDebtsBeforeNovember(): Promise<void> {
+  try {
+    const snap = await getDocs(collection(db, 'receivables'));
+    for (const d of snap.docs) {
+      const r = d.data() as Receivable;
+      // If dueDate is strictly prior to 2026-11-01 and it wasn't paid (or pending/vencido from past entryDate)
+      if (r.dueDate && r.dueDate < '2026-11-01' && r.status !== 'recebido') {
+        await deleteDoc(d.ref);
+      }
+    }
+  } catch (err) {
+    console.warn('Sincronização de cobranças a partir de Novembro:', err);
   }
 }
 

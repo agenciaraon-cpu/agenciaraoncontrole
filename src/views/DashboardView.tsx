@@ -80,10 +80,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0);
   };
 
-  // Pending receivables that have reached or passed their due date (or current competence)
+  // Pending receivables that have reached or passed their due date (counting strictly from November 2026 onwards)
   const pendingDueReceivables = useMemo(() => {
     return receivables
-      .filter((r) => r.status !== 'recebido')
+      .filter((r) => r.status !== 'recebido' && (!r.dueDate || r.dueDate >= '2026-11-01'))
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   }, [receivables]);
 
@@ -179,9 +179,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
     const totalPendingMonth = pendingAgency + pendingStandalone;
 
-    // Overdue (all months)
+    // Overdue (counting strictly from November / Mês 11 de 2026 onwards)
     const overdueTotal = receivables
-      .filter((r) => r.status === 'vencido')
+      .filter((r) => r.status === 'vencido' && (!r.dueDate || r.dueDate >= '2026-11-01'))
       .reduce((acc, r) => acc + (Number(r.originalAmount) - (Number(r.paidAmount) || 0)), 0);
 
     // Expenses (current month)

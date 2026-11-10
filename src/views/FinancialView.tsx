@@ -108,9 +108,13 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0);
   };
 
-  // Filtered Receivables with source filter
+  // Filtered Receivables with source filter (strictly counting from November 2026 onwards)
   const filteredReceivables = useMemo(() => {
     return receivables.filter((r) => {
+      // Exclude pre-November debts
+      if (r.dueDate && r.dueDate < '2026-11-01' && r.status !== 'recebido') {
+        return false;
+      }
       const matchComp = selectedCompetence === 'todas' || r.competence === selectedCompetence;
       const matchStatus = statusFilter === 'todos' || r.status === statusFilter;
       const matchSearch =
@@ -139,7 +143,12 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
 
   // Cash Flow Metrics for Selected Competence
   const cashFlowMetrics = useMemo(() => {
-    const recsInComp = receivables.filter((r) => selectedCompetence === 'todas' || r.competence === selectedCompetence);
+    const recsInComp = receivables.filter((r) => {
+      if (r.dueDate && r.dueDate < '2026-11-01' && r.status !== 'recebido') {
+        return false;
+      }
+      return selectedCompetence === 'todas' || r.competence === selectedCompetence;
+    });
     const expsInComp = expenses.filter((e) => selectedCompetence === 'todas' || e.competence === selectedCompetence);
 
     const totalPrevistoEntradas = recsInComp
@@ -202,29 +211,34 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
       await registerReceivablePayment(
         selectedReceivableForPayment.id,
         Number(paymentAmount),
-        Number(paymentDiscount),
-        paymentMethod,
-        paymentDate,
+        Number(paymentDiscount) || 0,
+        paymentMethod || selectedReceivableForPayment.paymentMethod || 'PIX',
+        paymentDate || new Date().toISOString().split('T')[0],
         user?.email || 'somosraon@gmail.com',
-        paymentNotes
+        paymentNotes || 'Baixa de pagamento registrada no painel'
       );
 
       // If this receivable is linked to a standalone sale, also confirm sale payment
       if (selectedReceivableForPayment.saleId) {
-        await confirmSalePayment(
-          selectedReceivableForPayment.saleId,
-          Number(paymentAmount),
-          paymentDate,
-          user?.email || 'somosraon@gmail.com'
-        );
+        try {
+          await confirmSalePayment(
+            selectedReceivableForPayment.saleId,
+            Number(paymentAmount),
+            paymentDate || new Date().toISOString().split('T')[0],
+            user?.email || 'somosraon@gmail.com'
+          );
+        } catch (saleErr) {
+          console.warn('Venda vinculada atualizada via registerReceivablePayment:', saleErr);
+        }
       }
 
       setIsPaymentModalOpen(false);
       setSelectedReceivableForPayment(null);
+      alert('✓ Baixa no pagamento registrada com sucesso! O valor já foi computado no Faturamento Recebido.');
       onRefresh();
-    } catch (err) {
-      console.error(err);
-      alert('Erro ao registrar baixa no pagamento.');
+    } catch (err: any) {
+      console.error('Erro ao dar baixa:', err);
+      alert('Erro ao registrar baixa no pagamento: ' + (err?.message || 'Tente novamente.'));
     }
   };
 

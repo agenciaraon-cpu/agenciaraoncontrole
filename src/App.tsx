@@ -48,6 +48,7 @@ import {
   getProductsServices,
   getProductCategories,
   getSales,
+  purgeDebtsBeforeNovember,
 } from './services/db';
 import { testFirestoreConnection } from './lib/firebase';
 
@@ -80,6 +81,7 @@ const AppContent: React.FC = () => {
     try {
       await testFirestoreConnection();
       await seedInitialDataIfEmpty();
+      await purgeDebtsBeforeNovember();
 
       const [
         cList,

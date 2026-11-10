@@ -494,6 +494,16 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                             </button>
                           )}
 
+                          {/* Quick Edit Client Trigger */}
+                          <button
+                            onClick={() => setSelectedClientForDetail(client)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/40 hover:bg-[#0878D9] text-[#0878D9] hover:text-white font-bold text-xs transition-colors shadow-xs"
+                            title="Editar dados, vencimento e configurações do cliente"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                            <span>Editar</span>
+                          </button>
+
                           {/* Full Client File Trigger */}
                           <button
                             onClick={() => setSelectedClientForDetail(client)}
@@ -965,7 +975,9 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
         <ClientDetailModal
           client={selectedClientForDetail}
           contracts={contracts.filter((c) => c.clientId === selectedClientForDetail.id)}
-          receivables={receivables.filter((r) => r.clientId === selectedClientForDetail.id)}
+          receivables={receivables.filter(
+            (r) => r.clientId === selectedClientForDetail.id && (!r.dueDate || r.dueDate >= '2026-11-01')
+          )}
           tasks={tasks.filter((t) => t.clientId === selectedClientForDetail.id)}
           documents={documents.filter((d) => d.clientId === selectedClientForDetail.id)}
           contactLogs={contactLogs.filter((l) => l.clientId === selectedClientForDetail.id)}
@@ -1041,7 +1053,15 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
     'dados' | 'plano' | 'contratos' | 'financeiro' | 'tarefas' | 'documentos' | 'contatos'
   >('dados');
 
-  const [editClient, setEditClient] = useState({ ...client });
+  const [editClient, setEditClient] = useState({
+    ...client,
+    entryDate: client.entryDate || '',
+    dueDay: client.dueDay || 10,
+    monthlyFee: client.monthlyFee || 0,
+    planName: client.planName || 'Plano Personalizado',
+    responsibleBirthDate: client.responsibleBirthDate || '',
+    companyAnniversaryDate: client.companyAnniversaryDate || '',
+  });
   const [isSaving, setIsSaving] = useState(false);
   const [confirmingRecId, setConfirmingRecId] = useState<string | null>(null);
 
@@ -1059,7 +1079,7 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
         r.id,
         amount,
         0,
-        'PIX',
+        r.paymentMethod || 'PIX',
         todayStr,
         userEmail,
         'Recebimento confirmado pelo gestor'
@@ -1084,28 +1104,32 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
         client.id,
         {
           companyName: editClient.companyName,
-          tradeName: editClient.tradeName,
+          tradeName: editClient.tradeName || '',
           responsibleName: editClient.responsibleName,
-          taxId: editClient.taxId,
-          phone: editClient.phone,
+          taxId: editClient.taxId || '',
+          phone: editClient.phone || '',
           whatsapp: editClient.whatsapp,
-          email: editClient.email,
-          address: editClient.address,
-          city: editClient.city,
-          state: editClient.state,
-          instagram: editClient.instagram,
-          monthlyFee: Number(editClient.monthlyFee),
-          dueDay: Number(editClient.dueDay),
+          email: editClient.email || '',
+          address: editClient.address || '',
+          city: editClient.city || '',
+          state: editClient.state || '',
+          instagram: editClient.instagram || '',
+          entryDate: editClient.entryDate || '',
+          dueDay: Number(editClient.dueDay) || 10,
+          monthlyFee: Number(editClient.monthlyFee) || 0,
+          planName: editClient.planName || client.planName,
+          responsibleBirthDate: editClient.responsibleBirthDate || '',
+          companyAnniversaryDate: editClient.companyAnniversaryDate || '',
           status: editClient.status,
-          notes: editClient.notes,
+          notes: editClient.notes || '',
         },
         user?.email || 'somosraon@gmail.com'
       );
       onRefresh();
-      alert('Dados do cliente atualizados com sucesso!');
-    } catch (err) {
+      alert('✓ Dados cadastrais, vencimento e configurações do cliente atualizados com sucesso!');
+    } catch (err: any) {
       console.error(err);
-      alert('Erro ao atualizar cliente.');
+      alert('Erro ao atualizar cliente: ' + (err?.message || 'Tente novamente.'));
     } finally {
       setIsSaving(false);
     }
@@ -1210,12 +1234,13 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs font-bold text-slate-500">Razão Social</label>
+                  <label className="text-xs font-bold text-slate-500">Razão Social *</label>
                   <input
                     type="text"
+                    required
                     value={editClient.companyName}
                     onChange={(e) => setEditClient({ ...editClient, companyName: e.target.value })}
-                    className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold"
+                    className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-[#0878D9]"
                   />
                 </div>
                 <div>
@@ -1224,25 +1249,27 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                     type="text"
                     value={editClient.tradeName || ''}
                     onChange={(e) => setEditClient({ ...editClient, tradeName: e.target.value })}
-                    className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold"
+                    className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-[#0878D9]"
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-slate-500">Responsável</label>
+                  <label className="text-xs font-bold text-slate-500">Nome do Responsável *</label>
                   <input
                     type="text"
+                    required
                     value={editClient.responsibleName}
                     onChange={(e) => setEditClient({ ...editClient, responsibleName: e.target.value })}
-                    className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold"
+                    className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-[#0878D9]"
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-slate-500">WhatsApp</label>
+                  <label className="text-xs font-bold text-slate-500">WhatsApp (com DDD) *</label>
                   <input
                     type="text"
+                    required
                     value={editClient.whatsapp}
                     onChange={(e) => setEditClient({ ...editClient, whatsapp: e.target.value })}
-                    className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold"
+                    className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-[#0878D9]"
                   />
                 </div>
                 <div>
@@ -1251,7 +1278,7 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                     type="email"
                     value={editClient.email || ''}
                     onChange={(e) => setEditClient({ ...editClient, email: e.target.value })}
-                    className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold"
+                    className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-[#0878D9]"
                   />
                 </div>
                 <div>
@@ -1260,7 +1287,7 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                     type="text"
                     value={editClient.instagram || ''}
                     onChange={(e) => setEditClient({ ...editClient, instagram: e.target.value })}
-                    className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold"
+                    className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-[#0878D9]"
                   />
                 </div>
                 <div>
@@ -1269,15 +1296,15 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                     type="text"
                     value={editClient.address || ''}
                     onChange={(e) => setEditClient({ ...editClient, address: e.target.value })}
-                    className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold"
+                    className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-[#0878D9]"
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-slate-500">Status</label>
+                  <label className="text-xs font-bold text-slate-500">Status do Cliente</label>
                   <select
                     value={editClient.status}
                     onChange={(e) => setEditClient({ ...editClient, status: e.target.value as ClientStatus })}
-                    className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold"
+                    className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-[#0878D9]"
                   >
                     <option value="ativo">Ativo</option>
                     <option value="pausado">Pausado / Temporariamente Desativado</option>
@@ -1285,6 +1312,105 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                     <option value="suspenso">Suspenso</option>
                     <option value="cancelado">Cancelado</option>
                   </select>
+                </div>
+              </div>
+
+              {/* Seção Destacada: Configurações de Faturamento, Entrada e Vencimento */}
+              <div className="p-4 bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#0878D9] flex items-center gap-1.5">
+                    <Calendar className="w-4 h-4 text-[#FF7817]" />
+                    <span>Contrato, Entrada & Vencimento</span>
+                  </h4>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                    Contagem ativa a partir deste mês (Novembro/2026)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Data de Entrada *
+                    </label>
+                    <input
+                      type="date"
+                      value={editClient.entryDate || ''}
+                      onChange={(e) => setEditClient({ ...editClient, entryDate: e.target.value })}
+                      className="w-full mt-1 px-3 py-2 bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-[#0878D9]"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-0.5">Ingresso na agência</p>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Dia de Vencimento *
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="31"
+                      value={editClient.dueDay || 10}
+                      onChange={(e) => setEditClient({ ...editClient, dueDay: parseInt(e.target.value, 10) || 10 })}
+                      className="w-full mt-1 px-3 py-2 bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-[#0878D9]"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-0.5">Dia do mês (ex: 5, 10, 15)</p>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Mensalidade (R$) *
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={editClient.monthlyFee || 0}
+                      onChange={(e) => setEditClient({ ...editClient, monthlyFee: parseFloat(e.target.value) || 0 })}
+                      className="w-full mt-1 px-3 py-2 bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-[#0878D9]"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-0.5">Valor contratado</p>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Plano Vinculado
+                    </label>
+                    <select
+                      value={editClient.planName || 'Plano Personalizado'}
+                      onChange={(e) => setEditClient({ ...editClient, planName: e.target.value })}
+                      className="w-full mt-1 px-3 py-2 bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-[#0878D9]"
+                    >
+                      <option value="Plano Start Bronze">Plano Start Bronze</option>
+                      <option value="Plano Prata Plus">Plano Prata Plus</option>
+                      <option value="Plano Gold Essencial">Plano Gold Essencial</option>
+                      <option value="Plano Personalizado">Plano Personalizado</option>
+                    </select>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Pacote contratado</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 border-t border-blue-100 dark:border-blue-900/20">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Aniversário do Responsável
+                    </label>
+                    <input
+                      type="date"
+                      value={editClient.responsibleBirthDate || ''}
+                      onChange={(e) => setEditClient({ ...editClient, responsibleBirthDate: e.target.value })}
+                      className="w-full mt-1 px-3 py-2 bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-[#0878D9]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Aniversário da Empresa
+                    </label>
+                    <input
+                      type="date"
+                      value={editClient.companyAnniversaryDate || ''}
+                      onChange={(e) => setEditClient({ ...editClient, companyAnniversaryDate: e.target.value })}
+                      className="w-full mt-1 px-3 py-2 bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-[#0878D9]"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1405,6 +1531,9 @@ const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                   <strong className="font-bold">Confirmação de Recebimento no Vencimento:</strong>
                   <p className="text-[11px] text-blue-700 dark:text-blue-300 mt-0.5">
                     Quando o cliente realizar o pagamento na data de vencimento, clique no botão <strong>"✓ Confirmar que Já Recebi"</strong>. O valor só entra no cálculo de <strong>Faturamento Recebido</strong> e no <strong>Resultado Financeiro do Dashboard</strong> após esta confirmação.
+                  </p>
+                  <p className="text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold mt-1">
+                    ✓ A contagem deste cliente vigora a partir deste mês (Novembro/2026). Débitos anteriores à entrada da gestão não são contabilizados.
                   </p>
                 </div>
               </div>
