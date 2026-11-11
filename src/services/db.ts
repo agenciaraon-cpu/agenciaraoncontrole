@@ -465,7 +465,7 @@ export async function generateReceivablesForContract(
 
     // Check if receivable already exists for this client and competence
     const exists = existingReceivables.some(
-      (r) => r.clientId === clientId && r.competence === competence && r.status !== 'cancelado'
+      (r) => r.clientId === clientId && r.competence === competence
     );
 
     if (!exists) {
@@ -633,6 +633,89 @@ export async function registerReceivablePayment(
   }
 }
 
+export async function reverseReceivablePayment(id: string, userEmail: string): Promise<void> {
+  try {
+    const docRef = doc(db, 'receivables', id);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) throw new Error('Cobrança não encontrada');
+    const current = snap.data() as Receivable;
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const newStatus = (current.dueDate && current.dueDate < todayStr) ? 'vencido' : 'pendente';
+    const oldPaid = Number(current.paidAmount) || 0;
+
+    await updateDoc(docRef, {
+      paidAmount: 0,
+      discountAmount: 0,
+      paymentDate: '',
+      status: newStatus,
+      updatedAt: new Date().toISOString(),
+    });
+
+    if (current.saleId) {
+      try {
+        const saleRef = doc(db, 'sales', current.saleId);
+        const saleSnap = await getDoc(saleRef);
+        if (saleSnap.exists()) {
+          await updateDoc(saleRef, {
+            financialStatus: 'pendente',
+            paidAmount: 0,
+            paymentDate: '',
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch (saleErr) {
+        console.warn('Aviso ao estornar venda vinculada:', saleErr);
+      }
+    }
+
+    await logAudit(
+      userEmail || 'agenciaraon@gmail.com',
+      'user',
+      'receivable',
+      id,
+      'reverse_payment',
+      `Estorno de recebimento no valor de R$ ${oldPaid} da cobrança ${current.description || id}. Status revertido para ${newStatus}.`
+    );
+  } catch (err) {
+    console.error('Erro em reverseReceivablePayment:', err);
+    handleFirestoreError(err, OperationType.UPDATE, `receivables/${id}`);
+  }
+}
+
+export async function deleteReceivable(id: string, description: string, userEmail: string): Promise<void> {
+  try {
+    const docRef = doc(db, 'receivables', id);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data() as Receivable;
+      if (data.saleId) {
+        try {
+          const saleRef = doc(db, 'sales', data.saleId);
+          await updateDoc(saleRef, {
+            receivableId: '',
+            updatedAt: new Date().toISOString(),
+          });
+        } catch (e) {
+          console.warn('Aviso ao desvincular venda do recebível excluído:', e);
+        }
+      }
+    }
+    await deleteDoc(docRef);
+    await logAudit(
+      userEmail || 'agenciaraon@gmail.com',
+      'user',
+      'receivable',
+      id,
+      'delete',
+      `Exclusão definitiva de cobrança/recebível: ${description || id}`
+    );
+  } catch (err) {
+    console.error('Erro em deleteReceivable:', err);
+    handleFirestoreError(err, OperationType.DELETE, `receivables/${id}`);
+  }
+}
+
 // Helper to remove any un-paid debts generated prior to November 2026 (mês 11)
 export async function purgeDebtsBeforeNovember(): Promise<void> {
   try {
@@ -778,6 +861,35 @@ export async function deleteExpense(id: string, description: string, userEmail: 
     await logAudit(userEmail, 'user', 'expense', id, 'delete', `Exclusão da despesa ${description}`);
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, `expenses/${id}`);
+  }
+}
+
+export async function reverseExpensePayment(id: string, userEmail: string): Promise<void> {
+  try {
+    const docRef = doc(db, 'expenses', id);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) throw new Error('Despesa não encontrada');
+    const expense = snap.data() as Expense;
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const newStatus = (expense.dueDate && expense.dueDate < todayStr) ? 'vencido' : 'pendente';
+
+    await updateDoc(docRef, {
+      status: newStatus,
+      paymentDate: '',
+    });
+
+    await logAudit(
+      userEmail || 'agenciaraon@gmail.com',
+      'user',
+      'expense',
+      id,
+      'reverse_payment',
+      `Estorno de quitação da despesa ${expense.description} (R$ ${expense.amount}). Status revertido para ${newStatus}.`
+    );
+  } catch (err) {
+    console.error('Erro em reverseExpensePayment:', err);
+    handleFirestoreError(err, OperationType.UPDATE, `expenses/${id}`);
   }
 }
 
@@ -1348,6 +1460,107 @@ export async function cancelSale(saleId: string, userEmail: string): Promise<voi
     await logAudit(userEmail, 'user', 'sale', saleId, 'cancel', `Venda ${sale.code} cancelada`);
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, `sales/${saleId}`);
+  }
+}
+
+export async function reverseSalePayment(saleId: string, userEmail: string): Promise<void> {
+  try {
+    const saleDocRef = doc(db, 'sales', saleId);
+    const saleSnap = await getDoc(saleDocRef);
+    if (!saleSnap.exists()) throw new Error('Venda não encontrada');
+    const sale = saleSnap.data() as Sale;
+    const oldPaid = Number(sale.paidAmount) || 0;
+
+    await updateDoc(saleDocRef, {
+      financialStatus: 'pendente',
+      paidAmount: 0,
+      paymentDate: '',
+      updatedAt: new Date().toISOString(),
+    });
+
+    if (sale.receivableId) {
+      try {
+        const recDocRef = doc(db, 'receivables', sale.receivableId);
+        const recSnap = await getDoc(recDocRef);
+        if (recSnap.exists()) {
+          const recData = recSnap.data() as Receivable;
+          const todayStr = new Date().toISOString().split('T')[0];
+          const newStatus = (recData.dueDate && recData.dueDate < todayStr) ? 'vencido' : 'pendente';
+          await updateDoc(recDocRef, {
+            status: newStatus,
+            paidAmount: 0,
+            discountAmount: 0,
+            paymentDate: '',
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch (recErr) {
+        console.warn('Aviso ao estornar cobrança vinculada à venda:', recErr);
+      }
+    }
+
+    await logAudit(
+      userEmail || 'agenciaraon@gmail.com',
+      'user',
+      'sale',
+      saleId,
+      'reverse_payment',
+      `Estorno de recebimento de R$ ${oldPaid} da venda ${sale.code} (${sale.itemName}). Status revertido para pendente.`
+    );
+  } catch (err) {
+    console.error('Erro em reverseSalePayment:', err);
+    handleFirestoreError(err, OperationType.UPDATE, `sales/${saleId}`);
+  }
+}
+
+export async function deleteSale(saleId: string, userEmail: string): Promise<void> {
+  try {
+    const saleDocRef = doc(db, 'sales', saleId);
+    const saleSnap = await getDoc(saleDocRef);
+    if (!saleSnap.exists()) throw new Error('Venda não encontrada');
+    const sale = saleSnap.data() as Sale;
+
+    // Restore stock if product
+    if (sale.itemType === 'produto' && sale.itemId) {
+      try {
+        const itemDocRef = doc(db, 'products_services', sale.itemId);
+        const itemSnap = await getDoc(itemDocRef);
+        if (itemSnap.exists()) {
+          const itemData = itemSnap.data() as ProductService;
+          if (typeof itemData.stockQuantity === 'number') {
+            await updateDoc(itemDocRef, {
+              stockQuantity: itemData.stockQuantity + (Number(sale.quantity) || 1),
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        }
+      } catch (stockErr) {
+        console.warn('Aviso ao restaurar estoque de venda excluída:', stockErr);
+      }
+    }
+
+    // Delete matching receivable
+    if (sale.receivableId) {
+      try {
+        await deleteDoc(doc(db, 'receivables', sale.receivableId));
+      } catch (recErr) {
+        console.warn('Aviso ao excluir recebível vinculado à venda:', recErr);
+      }
+    }
+
+    await deleteDoc(saleDocRef);
+
+    await logAudit(
+      userEmail || 'agenciaraon@gmail.com',
+      'user',
+      'sale',
+      saleId,
+      'delete',
+      `Exclusão definitiva de venda ${sale.code} (${sale.itemName}) no valor de R$ ${sale.totalAmount}`
+    );
+  } catch (err) {
+    console.error('Erro em deleteSale:', err);
+    handleFirestoreError(err, OperationType.DELETE, `sales/${saleId}`);
   }
 }
 

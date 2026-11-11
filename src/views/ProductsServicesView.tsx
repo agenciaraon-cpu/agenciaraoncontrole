@@ -25,6 +25,7 @@ import {
   Ban,
   FileText,
   Boxes,
+  RotateCcw,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import {
@@ -43,7 +44,9 @@ import {
   deleteProductCategory,
   createSale,
   confirmSalePayment,
+  reverseSalePayment,
   cancelSale,
+  deleteSale,
 } from '../services/db';
 import { useAuth } from '../context/AuthContext';
 
@@ -467,6 +470,48 @@ export const ProductsServicesView: React.FC<ProductsServicesViewProps> = ({
     }
   };
 
+  const handleReverseSalePayment = async (sale: Sale) => {
+    const amount = Number(sale.paidAmount) || Number(sale.totalAmount);
+    const confirmed = window.confirm(
+      `Deseja realmente ESTORNAR o recebimento da venda ${sale.code} (${sale.itemName}) no valor de ${formatCurrency(amount)}?\n\n` +
+      `• O status da venda voltará para "Pendente".\n` +
+      `• O valor será IMEDIATAMENTE removido do Total Recebido do Dashboard e do Financeiro.\n` +
+      `• A cobrança vinculada também voltará para pendente.`
+    );
+    if (!confirmed) return;
+
+    try {
+      const userEmail = user?.email || 'agenciaraon@gmail.com';
+      await reverseSalePayment(sale.id, userEmail);
+      alert(`✓ Recebimento da venda estornado com sucesso!\nO valor de ${formatCurrency(amount)} foi deduzido do Dashboard.`);
+      onRefresh();
+    } catch (err: any) {
+      console.error('Erro ao estornar recebimento da venda:', err);
+      alert('Erro ao estornar: ' + (err?.message || 'Tente novamente.'));
+    }
+  };
+
+  const handleDeleteSale = async (sale: Sale) => {
+    const confirmed = window.confirm(
+      `Tem certeza que deseja EXCLUIR DEFINITIVAMENTE a venda ${sale.code} (${sale.itemName}) no valor de ${formatCurrency(sale.totalAmount)}?\n\n` +
+      `• O lançamento será apagado do sistema e do Dashboard.\n` +
+      `• Se for produto físico, a quantidade (${sale.quantity}x) será restaurada no estoque.\n` +
+      `• O recebível financeiro vinculado será excluído.\n` +
+      `• Esta ação não pode ser desfeita.`
+    );
+    if (!confirmed) return;
+
+    try {
+      const userEmail = user?.email || 'agenciaraon@gmail.com';
+      await deleteSale(sale.id, userEmail);
+      alert(`✓ Venda ${sale.code} excluída com sucesso!\nO estoque foi restaurado e o Dashboard foi atualizado.`);
+      onRefresh();
+    } catch (err: any) {
+      console.error('Erro ao excluir venda:', err);
+      alert('Erro ao excluir venda: ' + (err?.message || 'Tente novamente.'));
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* ==================== VIEW HEADER ==================== */}
@@ -827,7 +872,7 @@ export const ProductsServicesView: React.FC<ProductsServicesViewProps> = ({
                           </div>
                         </td>
                         <td className="py-3.5 px-4 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
+                          <div className="flex items-center justify-end gap-1.5 flex-wrap">
                             {isPending && (
                               <button
                                 onClick={() => {
@@ -842,19 +887,36 @@ export const ProductsServicesView: React.FC<ProductsServicesViewProps> = ({
                               </button>
                             )}
                             {isPaid && (
-                              <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-500/20">
-                                Recebido em {sale.paymentDate || sale.saleDate} ✓
-                              </span>
+                              <>
+                                <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                                  Recebido em {sale.paymentDate || sale.saleDate} ✓
+                                </span>
+                                <button
+                                  onClick={() => handleReverseSalePayment(sale)}
+                                  className="px-2 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500 text-amber-700 hover:text-white border border-amber-500/30 font-bold text-[11px] shadow-xs flex items-center gap-1 transition-all"
+                                  title="Estornar recebimento desta venda (volta para pendente e deduz do Dashboard)"
+                                >
+                                  <RotateCcw className="w-3 h-3" />
+                                  <span>Estornar</span>
+                                </button>
+                              </>
                             )}
-                            {!isCanceled && (
+                            {!isCanceled && !isPaid && (
                               <button
                                 onClick={() => handleCancelSale(sale)}
-                                className="p-1 rounded text-slate-400 hover:text-red-600"
+                                className="p-1 rounded text-slate-400 hover:text-amber-600 transition-colors"
                                 title="Cancelar Venda"
                               >
                                 <Ban className="w-3.5 h-3.5" />
                               </button>
                             )}
+                            <button
+                              onClick={() => handleDeleteSale(sale)}
+                              className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
+                              title="Excluir venda lançada errada (restaura estoque e remove do Dashboard)"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </td>
                       </tr>

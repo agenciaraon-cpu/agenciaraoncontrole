@@ -26,6 +26,9 @@ import {
   CheckSquare,
   MessageCircle,
   Bell,
+  RotateCcw,
+  Trash2,
+  Undo2,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import {
@@ -45,7 +48,11 @@ import {
 } from 'recharts';
 import { Client, Contract, Receivable, Expense, ActiveTab, Sale, ProductService, Task } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { registerReceivablePayment } from '../services/db';
+import {
+  registerReceivablePayment,
+  reverseReceivablePayment,
+  deleteReceivable,
+} from '../services/db';
 
 interface DashboardViewProps {
   clients: Client[];
@@ -74,6 +81,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 }) => {
   const { isCollaborator } = useAuth();
   const [confirmingRecId, setConfirmingRecId] = useState<string | null>(null);
+  const [dashboardTab, setDashboardTab] = useState<'vencidos' | 'recebidos'>('vencidos');
 
   const now = new Date();
   const currentMonthNum = String(now.getMonth() + 1).padStart(2, '0');
@@ -98,6 +106,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       })
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   }, [receivables, todayStr]);
+
+  // Mostra os recebimentos confirmados no mês atual (permite estornar ou excluir se lançado errado)
+  const confirmedReceivablesThisMonth = useMemo(() => {
+    return receivables
+      .filter((r) => {
+        const isComp = r.competence === currentCompetence;
+        const isPaid = r.status === 'recebido' || (Number(r.paidAmount) || 0) > 0;
+        return isComp && isPaid;
+      })
+      .sort((a, b) => (b.paymentDate || b.updatedAt || '').localeCompare(a.paymentDate || a.updatedAt || ''));
+  }, [receivables, currentCompetence]);
 
   // Tarefas com vencimento para hoje
   const tasksDueToday = useMemo(() => {
@@ -131,6 +150,48 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       alert('Erro ao confirmar recebimento: ' + (err?.message || 'Tente novamente.'));
     } finally {
       setConfirmingRecId(null);
+    }
+  };
+
+  // Handler to reverse a payment mistakenly confirmed
+  const handleReverseReceipt = async (r: Receivable) => {
+    const amount = Number(r.paidAmount) || Number(r.originalAmount);
+    const confirmed = window.confirm(
+      `Deseja realmente ESTORNAR o recebimento de ${formatCurrency(amount)} do cliente "${r.clientName}"?\n\n` +
+      `• O status da cobrança voltará para Pendente/Vencido.\n` +
+      `• O valor será IMEDIATAMENTE removido do Total Recebido no Mês do Dashboard.\n` +
+      `• Se houver venda vinculada, ela também voltará para pendente.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await reverseReceivablePayment(r.id, 'agenciaraon@gmail.com');
+      alert(`✓ Recebimento estornado com sucesso!\nO valor de ${formatCurrency(amount)} foi deduzido do Total Recebido do Dashboard.`);
+      onRefresh?.();
+    } catch (err: any) {
+      console.error('Erro ao estornar recebimento:', err);
+      alert('Erro ao estornar recebimento: ' + (err?.message || 'Tente novamente.'));
+    }
+  };
+
+  // Handler to delete a mistakenly launched receivable
+  const handleDeleteMistakenReceivable = async (r: Receivable) => {
+    const amount = Number(r.originalAmount);
+    const confirmed = window.confirm(
+      `Tem certeza que deseja EXCLUIR DEFINITIVAMENTE este lançamento de ${formatCurrency(amount)} (${r.clientName})?\n\n` +
+      `• O registro será apagado do banco de dados.\n` +
+      `• Se o valor tiver sido confirmado, sairá automaticamente do Dashboard.\n` +
+      `• Esta ação não pode ser desfeita.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await deleteReceivable(r.id, r.description, 'agenciaraon@gmail.com');
+      alert(`✓ Cobrança excluída com sucesso!\nO Dashboard foi recalculado automaticamente.`);
+      onRefresh?.();
+    } catch (err: any) {
+      console.error('Erro ao excluir lançamento:', err);
+      alert('Erro ao excluir: ' + (err?.message || 'Tente novamente.'));
     }
   };
 
@@ -525,94 +586,218 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       )}
 
-      {/* ==================== AVISO & CONFIRMAÇÃO DE COBRANÇAS VENCIDAS (DAR BAIXA) ==================== */}
-      <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#10192A] border border-red-200 dark:border-red-900/40 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+      {/* ==================== AVISO, CONFIRMAÇÃO & ESTORNO DE COBRANÇAS / RECEBIMENTOS ==================== */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#10192A] border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-red-500/10 text-red-600 dark:text-red-400">
-              <Clock className="w-5 h-5" />
+            <div className={`p-2 rounded-xl ${dashboardTab === 'vencidos' ? 'bg-red-500/10 text-red-600 dark:text-red-400' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'}`}>
+              {dashboardTab === 'vencidos' ? <Clock className="w-5 h-5" /> : <TrendingUp className="w-5 h-5" />}
             </div>
             <div>
-              <h3 className="font-bold text-sm text-slate-800 dark:text-white flex items-center gap-2">
-                Cobranças Vencidas — Aguardando Confirmação (Dar Baixa)
-                {overdueReceivables.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-bold text-sm text-slate-800 dark:text-white">
+                  Controle Operacional de Cobranças & Baixas
+                </h3>
+                {dashboardTab === 'vencidos' && overdueReceivables.length > 0 && (
                   <span className="px-2 py-0.5 rounded-full bg-red-500 text-white text-[10px] font-black animate-pulse">
-                    {overdueReceivables.length} {overdueReceivables.length === 1 ? 'vencido para dar baixa' : 'vencidos para dar baixa'}
+                    {overdueReceivables.length} {overdueReceivables.length === 1 ? 'vencido' : 'vencidos'}
                   </span>
                 )}
-              </h3>
+                {dashboardTab === 'recebidos' && (
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 text-[10px] font-black">
+                    {confirmedReceivablesThisMonth.length} recebidos neste mês
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Mostrando apenas contas vencidas a partir deste mês (Novembro/2026). O valor só entra no <strong>Total Recebido no Mês</strong> após você confirmar o recebimento.
+                {dashboardTab === 'vencidos'
+                  ? 'Contas vencidas a partir deste mês (Novembro/2026). Dê baixa para lançar no Faturamento Recebido.'
+                  : 'Recebimentos confirmados na competência atual. Estorne ou exclua valores lançados incorretamente.'}
               </p>
             </div>
           </div>
-          <button
-            onClick={() => onNavigate('financial')}
-            className="text-xs font-bold text-[#0878D9] hover:underline flex items-center gap-1 self-start sm:self-auto"
-          >
-            Ver módulo financeiro completo <ChevronRight className="w-3.5 h-3.5" />
-          </button>
+
+          <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+            {/* Sub-tabs switcher */}
+            <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
+              <button
+                onClick={() => setDashboardTab('vencidos')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  dashboardTab === 'vencidos'
+                    ? 'bg-red-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
+                }`}
+              >
+                Vencidos para Dar Baixa ({overdueReceivables.length})
+              </button>
+              <button
+                onClick={() => setDashboardTab('recebidos')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  dashboardTab === 'recebidos'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
+                }`}
+              >
+                Recebidos / Estornar ({confirmedReceivablesThisMonth.length})
+              </button>
+            </div>
+
+            <button
+              onClick={() => onNavigate('financial')}
+              className="text-xs font-bold text-[#0878D9] hover:underline flex items-center gap-1 ml-1"
+            >
+              Módulo financeiro <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
 
-        {overdueReceivables.length === 0 ? (
-          <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/30 text-emerald-800 dark:text-emerald-300 flex items-center gap-2 text-xs font-semibold">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-            <span>Excelente! Não há cobranças vencidas pendentes no momento. Todas as empresas cadastradas estão com pagamentos em dia ou já confirmados.</span>
-          </div>
-        ) : (
-          <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1">
-            {overdueReceivables.map((r) => {
-              const sourceLabel =
-                r.revenueSource === 'produto'
-                  ? 'Produto'
-                  : r.revenueSource === 'servico_avulso'
-                  ? 'Serviço Avulso'
-                  : 'Agência';
+        {/* TAB 1: COBRANÇAS VENCIDAS */}
+        {dashboardTab === 'vencidos' && (
+          <div>
+            {overdueReceivables.length === 0 ? (
+              <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/30 text-emerald-800 dark:text-emerald-300 flex items-center gap-2 text-xs font-semibold">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <span>Excelente! Não há cobranças vencidas pendentes no momento. Todas as empresas cadastradas estão com pagamentos em dia ou já confirmados.</span>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1">
+                {overdueReceivables.map((r) => {
+                  const sourceLabel =
+                    r.revenueSource === 'produto'
+                      ? 'Produto'
+                      : r.revenueSource === 'servico_avulso'
+                      ? 'Serviço Avulso'
+                      : 'Agência';
 
-              return (
-                <div
-                  key={r.id}
-                  className="p-3 rounded-xl bg-red-50/40 dark:bg-slate-900/60 border border-red-200 dark:border-red-900/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-red-400 transition-all"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="p-2 rounded-lg shrink-0 mt-0.5 bg-red-500/10 text-red-600">
-                      <DollarSign className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-xs text-slate-800 dark:text-white">
-                          {r.clientName}
-                        </span>
-                        <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                          {sourceLabel}
-                        </span>
-                        <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 border border-red-500/20">
-                          Vencido ({r.dueDate})
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        {r.description} • Competência: <strong>{r.competence}</strong> • Vencimento original: <strong>{r.dueDate}</strong>
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between sm:justify-end gap-3 self-end sm:self-auto w-full sm:w-auto">
-                    <span className="text-sm font-black text-red-600 dark:text-red-400">
-                      {formatCurrency(Number(r.originalAmount) - (Number(r.paidAmount) || 0))}
-                    </span>
-                    <button
-                      onClick={() => handleConfirmReceipt(r)}
-                      disabled={confirmingRecId === r.id}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition-all hover:scale-105 disabled:opacity-50"
-                      title="Confirmar recebimento e lançar no Dashboard"
+                  return (
+                    <div
+                      key={r.id}
+                      className="p-3 rounded-xl bg-red-50/40 dark:bg-slate-900/60 border border-red-200 dark:border-red-900/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-red-400 transition-all"
                     >
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>{confirmingRecId === r.id ? 'Confirmando...' : '✓ Confirmar que Já Recebi'}</span>
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 rounded-lg shrink-0 mt-0.5 bg-red-500/10 text-red-600">
+                          <DollarSign className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-xs text-slate-800 dark:text-white">
+                              {r.clientName}
+                            </span>
+                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                              {sourceLabel}
+                            </span>
+                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 border border-red-500/20">
+                              Vencido ({r.dueDate})
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            {r.description} • Competência: <strong>{r.competence}</strong> • Vencimento: <strong>{r.dueDate}</strong>
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between sm:justify-end gap-2.5 self-end sm:self-auto w-full sm:w-auto">
+                        <span className="text-sm font-black text-red-600 dark:text-red-400">
+                          {formatCurrency(Number(r.originalAmount) - (Number(r.paidAmount) || 0))}
+                        </span>
+
+                        <button
+                          onClick={() => handleConfirmReceipt(r)}
+                          disabled={confirmingRecId === r.id}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition-all hover:scale-105 disabled:opacity-50"
+                          title="Confirmar recebimento e lançar no Dashboard"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>{confirmingRecId === r.id ? 'Confirmando...' : '✓ Confirmar que Já Recebi'}</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleDeleteMistakenReceivable(r)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
+                          title="Excluir cobrança se foi lançada errada"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB 2: RECEBIMENTOS CONFIRMADOS NO MÊS (PERMITE ESTORNAR OU EXCLUIR) */}
+        {dashboardTab === 'recebidos' && (
+          <div>
+            {confirmedReceivablesThisMonth.length === 0 ? (
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 text-xs text-center">
+                Nenhum recebimento confirmado na competência atual ({currentCompetence}) ainda.
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1">
+                {confirmedReceivablesThisMonth.map((r) => {
+                  const sourceLabel =
+                    r.revenueSource === 'produto'
+                      ? 'Produto'
+                      : r.revenueSource === 'servico_avulso'
+                      ? 'Serviço Avulso'
+                      : 'Agência';
+
+                  return (
+                    <div
+                      key={r.id}
+                      className="p-3 rounded-xl bg-emerald-50/40 dark:bg-slate-900/60 border border-emerald-200 dark:border-emerald-900/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-emerald-400 transition-all"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 rounded-lg shrink-0 mt-0.5 bg-emerald-500/10 text-emerald-600">
+                          <CheckCircle2 className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-xs text-slate-800 dark:text-white">
+                              {r.clientName}
+                            </span>
+                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                              {sourceLabel}
+                            </span>
+                            <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/60 px-2 py-0.5 rounded-md">
+                              Recebido em {r.paymentDate || 'Mês Atual'} ({r.paymentMethod || 'PIX'})
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            {r.description} • Competência: <strong>{r.competence}</strong>
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between sm:justify-end gap-2.5 self-end sm:self-auto w-full sm:w-auto">
+                        <span className="text-sm font-black text-emerald-600 dark:text-emerald-400">
+                          {formatCurrency(Number(r.paidAmount) || Number(r.originalAmount))}
+                        </span>
+
+                        <button
+                          onClick={() => handleReverseReceipt(r)}
+                          className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500 text-amber-700 hover:text-white border border-amber-500/30 font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition-all"
+                          title="Estornar recebimento lançado errado (reverte para pendente e deduz do Dashboard)"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Estornar Recebimento</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleDeleteMistakenReceivable(r)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
+                          title="Excluir cobrança se foi lançada errada"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>
