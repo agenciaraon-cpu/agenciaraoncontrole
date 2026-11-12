@@ -511,95 +511,154 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
 
       {/* ==================== VIEW 1: KANBAN ==================== */}
       {viewMode === 'kanban' && (
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3.5 overflow-x-auto pb-4">
+        <div className="flex items-start gap-4 overflow-x-auto pb-6 pt-1 px-1">
           {columns.map((col) => {
             const colTasks = filteredTasks.filter((t) => t.status === col.id);
 
             return (
               <div
                 key={col.id}
-                className="flex flex-col bg-slate-100/60 dark:bg-slate-900/60 rounded-2xl p-3 border border-slate-200/80 dark:border-slate-800 min-w-[240px]"
+                className="flex flex-col bg-slate-100/70 dark:bg-slate-900/70 rounded-2xl p-3.5 border border-slate-200/90 dark:border-slate-800 w-[300px] sm:w-[325px] shrink-0 shadow-xs"
               >
                 {/* Column Header */}
                 <div className="flex items-center justify-between mb-3 px-1">
                   <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#0878D9]" />
+                    <span className={`w-2.5 h-2.5 rounded-full ${
+                      col.id === 'concluida' ? 'bg-emerald-500' :
+                      col.id === 'em_andamento' ? 'bg-[#0878D9]' :
+                      col.id === 'aguardando_cliente' ? 'bg-amber-500' :
+                      col.id === 'em_revisao' ? 'bg-purple-500' :
+                      col.id === 'cancelada' ? 'bg-red-500' : 'bg-slate-400'
+                    }`} />
                     <h3 className="font-bold text-xs text-slate-800 dark:text-slate-200">
                       {col.label}
                     </h3>
                   </div>
-                  <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
                     {colTasks.length}
                   </span>
                 </div>
 
-                {/* Cards List */}
-                <div className="flex-1 space-y-2.5 overflow-y-auto max-h-[65vh]">
+                {/* Cards List - Ample space, no text clipped */}
+                <div className="flex-1 space-y-3.5 overflow-y-auto max-h-[76vh] p-1">
                   {colTasks.length === 0 ? (
-                    <div className="p-4 text-center text-slate-400 text-[11px] border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
-                      Nenhuma tarefa
+                    <div className="p-5 text-center text-slate-400 text-[11px] border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl">
+                      Nenhuma tarefa nesta etapa
                     </div>
                   ) : (
                     colTasks.map((task) => {
                       const isOverdue = task.dueDate < todayStr && task.status !== 'concluida' && task.status !== 'cancelada';
+                      const isDueToday = task.dueDate === todayStr && task.status !== 'concluida' && task.status !== 'cancelada';
+                      const isUrgent = task.priority === 'urgente';
 
                       return (
                         <div
                           key={task.id}
                           onClick={() => setSelectedTask(task)}
-                          className={`p-3 bg-white dark:bg-[#10192A] rounded-xl border shadow-xs hover:border-[#0878D9] hover:shadow-md transition-all cursor-pointer group space-y-2 ${
-                            isOverdue ? 'border-red-300 dark:border-red-900/50' : 'border-slate-200 dark:border-slate-800'
+                          className={`relative p-3.5 rounded-2xl transition-all cursor-pointer group space-y-2.5 ${
+                            isUrgent
+                              ? 'urgent-task-glow bg-red-50/70 dark:bg-red-950/30'
+                              : isOverdue
+                              ? 'bg-white dark:bg-[#10192A] border-2 border-red-300 dark:border-red-900/60 shadow-xs hover:border-red-400'
+                              : 'bg-white dark:bg-[#10192A] border border-slate-200/90 dark:border-slate-800 shadow-xs hover:border-[#0878D9] hover:shadow-md'
                           }`}
                         >
                           {/* Client & Priority */}
-                          <div className="flex items-center justify-between gap-1">
-                            <span className="text-[10px] font-bold text-[#0878D9] truncate max-w-[120px]">
-                              {task.clientName || 'Geral'}
-                            </span>
-                            <span
-                              className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md ${
-                                priorityBadge[task.priority]?.bg
-                              } ${priorityBadge[task.priority]?.text}`}
-                            >
-                              {task.priority}
-                            </span>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <span className="text-xs font-black text-[#0878D9] dark:text-[#38BDF8] break-words block leading-tight">
+                                {task.clientName || 'Geral Raon'}
+                              </span>
+                              {task.serviceName && (
+                                <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                                  {task.serviceName}
+                                </span>
+                              )}
+                            </div>
+
+                            {isUrgent ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-red-600 text-white animate-pulse shadow-xs shrink-0">
+                                <AlertCircle className="w-3 h-3" />
+                                URGENTE
+                              </span>
+                            ) : (
+                              <span
+                                className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md shrink-0 ${
+                                  priorityBadge[task.priority]?.bg
+                                } ${priorityBadge[task.priority]?.text}`}
+                              >
+                                {task.priority}
+                              </span>
+                            )}
                           </div>
 
-                          {/* Title */}
-                          <h4 className="font-bold text-xs text-slate-800 dark:text-slate-200 leading-snug line-clamp-2">
+                          {/* Task Title - completely visible in full, no truncation or line clamp */}
+                          <h4 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white leading-snug break-words">
                             {task.title}
                           </h4>
 
-                          {/* Dates Breakdown */}
-                          <div className="space-y-1 text-[10px] text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-100 dark:border-slate-800/80">
+                          {/* Briefing / Description preview (if exists) */}
+                          {task.description && (
+                            <p className="text-[11px] text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900/70 p-2 rounded-xl border border-slate-100 dark:border-slate-800/80 break-words leading-relaxed whitespace-pre-wrap">
+                              {task.description}
+                            </p>
+                          )}
+
+                          {/* Tracking Dates: Solicitação, Prazo de Entrega, Conclusão, Responsável */}
+                          <div className="space-y-1.5 text-[11px] pt-2 border-t border-slate-100 dark:border-slate-800/80">
                             {task.requestedDate && (
-                              <div className="flex items-center justify-between">
-                                <span className="text-slate-400">Pedido:</span>
+                              <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+                                <span className="flex items-center gap-1 text-slate-400">
+                                  <Calendar className="w-3 h-3" />
+                                  Solicitado:
+                                </span>
                                 <span className="font-semibold text-slate-700 dark:text-slate-300">{task.requestedDate}</span>
                               </div>
                             )}
+
                             <div className="flex items-center justify-between">
-                              <span className={isOverdue ? 'text-red-600 font-bold' : 'text-slate-400'}>
-                                {isOverdue ? 'Atrasado:' : 'Prazo:'}
+                              <span className={`flex items-center gap-1 ${isOverdue ? 'text-red-600 font-black' : isDueToday ? 'text-amber-600 font-bold' : 'text-slate-400'}`}>
+                                <Clock className="w-3 h-3" />
+                                {isOverdue ? 'Atrasado:' : isDueToday ? 'Entrega Hoje:' : 'Prazo de Entrega:'}
                               </span>
-                              <span className={`font-semibold ${isOverdue ? 'text-red-600 font-bold' : 'text-slate-700 dark:text-slate-300'}`}>
+                              <span
+                                className={`font-black ${
+                                  isOverdue
+                                    ? 'text-red-600 bg-red-100 dark:bg-red-950/60 px-1.5 py-0.5 rounded'
+                                    : isDueToday
+                                    ? 'text-amber-600 bg-amber-100 dark:bg-amber-950/60 px-1.5 py-0.5 rounded'
+                                    : 'text-slate-700 dark:text-slate-300'
+                                }`}
+                              >
                                 {task.dueDate}
                               </span>
                             </div>
+
                             {task.completedAt && (
-                              <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400">
-                                <span className="font-bold">Concluída:</span>
-                                <span className="font-bold">{task.completedAt}</span>
+                              <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 p-1.5 rounded-lg border border-emerald-500/20">
+                                <span className="font-bold flex items-center gap-1">
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  Concluído em:
+                                </span>
+                                <span className="font-black">{task.completedAt}</span>
                               </div>
                             )}
+
+                            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 pt-0.5">
+                              <span className="flex items-center gap-1 text-slate-400">
+                                <User className="w-3 h-3" />
+                                Responsável:
+                              </span>
+                              <span className="font-semibold text-slate-700 dark:text-slate-300">{task.assignedTo || 'Equipe Raon'}</span>
+                            </div>
                           </div>
 
-                          {/* Fast Move select & WhatsApp reminder button */}
-                          <div onClick={(e) => e.stopPropagation()} className="pt-1 flex items-center gap-1.5">
+                          {/* Fast Move select, WhatsApp reminder button, Quick Delete */}
+                          <div onClick={(e) => e.stopPropagation()} className="pt-2 flex items-center gap-1.5 border-t border-slate-100 dark:border-slate-800/80">
                             <select
                               value={task.status}
                               onChange={(e) => handleUpdateStatus(task, e.target.value as TaskStatus)}
-                              className="flex-1 text-[10px] font-bold p-1 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300"
+                              className="flex-1 text-[11px] font-bold py-1.5 px-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-700 dark:text-slate-200 focus:ring-1 focus:ring-[#0878D9]"
                             >
                               <option value="a_fazer">Mover: A Fazer</option>
                               <option value="em_andamento">Mover: Em Andamento</option>
@@ -611,10 +670,18 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
 
                             <button
                               onClick={() => handleOpenWhatsAppTaskAlert(task)}
-                              className="p-1 rounded-lg bg-[#25D366]/10 hover:bg-[#25D366] hover:text-white text-[#25D366] transition-colors shrink-0"
+                              className="p-1.5 rounded-xl bg-[#25D366]/10 hover:bg-[#25D366] hover:text-white text-[#25D366] transition-colors shrink-0 shadow-xs"
                               title="Enviar lembrete desta tarefa para o WhatsApp"
                             >
-                              <MessageCircle className="w-3.5 h-3.5" />
+                              <MessageCircle className="w-4 h-4" />
+                            </button>
+
+                            <button
+                              onClick={() => handleDeleteTask(task)}
+                              className="p-1.5 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors shrink-0"
+                              title="Excluir tarefa"
+                            >
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
                         </div>
@@ -653,16 +720,30 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
               ) : (
                 filteredTasks.map((t) => {
                   const isOverdue = t.dueDate < todayStr && t.status !== 'concluida' && t.status !== 'cancelada';
+                  const isUrgent = t.priority === 'urgente';
 
                   return (
                     <tr
                       key={t.id}
                       onClick={() => setSelectedTask(t)}
-                      className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 cursor-pointer"
+                      className={`hover:bg-slate-50/70 dark:hover:bg-slate-800/40 cursor-pointer transition-colors ${
+                        isUrgent
+                          ? 'bg-red-50/60 dark:bg-red-950/25 border-l-4 border-l-red-600'
+                          : isOverdue
+                          ? 'border-l-4 border-l-amber-500'
+                          : ''
+                      }`}
                     >
                       <td className="py-3 px-4">
-                        <div className="font-bold text-slate-800 dark:text-slate-200">{t.title}</div>
-                        <div className="text-[11px] text-slate-400">{t.clientName} • {t.serviceName}</div>
+                        <div className="flex items-center gap-2">
+                          {isUrgent && (
+                            <span className="px-1.5 py-0.5 rounded bg-red-600 text-white text-[9px] font-black uppercase animate-pulse shrink-0">
+                              🚨 URGENTE
+                            </span>
+                          )}
+                          <div className="font-bold text-slate-800 dark:text-slate-200">{t.title}</div>
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">{t.clientName} • {t.serviceName}</div>
                       </td>
                       <td className="py-3 px-4 font-mono">{t.requestedDate || '—'}</td>
                       <td className={`py-3 px-4 font-mono font-bold ${isOverdue ? 'text-red-600' : ''}`}>
@@ -671,9 +752,16 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, clients, onRefresh 
                       </td>
                       <td className="py-3 px-4 font-mono text-emerald-600 font-bold">{t.completedAt || '—'}</td>
                       <td className="py-3 px-4">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${priorityBadge[t.priority]?.bg} ${priorityBadge[t.priority]?.text}`}>
-                          {t.priority}
-                        </span>
+                        {isUrgent ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase bg-red-600 text-white animate-pulse shadow-xs">
+                            <AlertCircle className="w-3 h-3" />
+                            URGENTE
+                          </span>
+                        ) : (
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${priorityBadge[t.priority]?.bg} ${priorityBadge[t.priority]?.text}`}>
+                            {t.priority}
+                          </span>
+                        )}
                       </td>
                       <td className="py-3 px-4">
                         <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">

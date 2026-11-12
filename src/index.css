@@ -44,3 +44,21 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(8, 120, 217, 0.5);
 }
+
+/* Efeito pulsante de alerta vermelho para tarefas urgentes */
+@keyframes urgent-card-pulse {
+  0%, 100% {
+    border-color: #EF4444;
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6), 0 0 16px rgba(239, 68, 68, 0.35);
+  }
+  50% {
+    border-color: #DC2626;
+    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.25), 0 0 24px rgba(239, 68, 68, 0.65);
+  }
+}
+
+.urgent-task-glow {
+  border-width: 2.5px !important;
+  border-style: solid !important;
+  animation: urgent-card-pulse 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite !important;
+}
